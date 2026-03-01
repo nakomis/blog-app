@@ -23,7 +23,6 @@ async function processMarkdownContent(markdownContent: string, slug: string) {
   return {
     slug,
     frontmatter,
-    content,
     html: result.toString(),
   };
 }
