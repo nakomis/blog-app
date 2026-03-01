@@ -44,7 +44,6 @@ export async function processMarkdown(markdownContent: string, slug: string): Pr
   return {
     slug,
     frontmatter: frontmatter as BlogPost['frontmatter'],
-    content,
     html: result.toString(),
   };
 }

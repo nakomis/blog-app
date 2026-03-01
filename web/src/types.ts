@@ -8,7 +8,6 @@ export interface BlogPost {
     author: string;
     canonical: string;
   };
-  content: string;
   html: string;
 }
 
