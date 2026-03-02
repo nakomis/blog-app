@@ -2,7 +2,7 @@ export default function BlogFooter() {
   return (
     <footer className="blog-footer">
       <p>
-        <a href="https://github.com/nakomis/nakom.is" target="_blank" rel="noopener">
+        <a href="https://github.com/nakomis/blog-app" target="_blank" rel="noopener">
           Website code
         </a>{' '}
         licensed under CC0.
