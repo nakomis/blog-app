@@ -16,6 +16,11 @@ export default function BlogHeader() {
             {' (paraphrased)'}
           </p>
           <p className="hero-description">Making cloud abstractions tangible through physical hardware.</p>
+          <p className="hero-description">
+            <a href="https://nakom.is" target="_blank" rel="noopener" className="cta-chat">
+              Chat with me →
+            </a>
+          </p>
         </div>
         <div className="header-spacer" aria-hidden="true" />
       </div>
