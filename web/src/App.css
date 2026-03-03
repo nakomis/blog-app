@@ -110,6 +110,15 @@ a:hover {
   margin: 0;
 }
 
+.cta-chat {
+  color: #81c784;
+  font-weight: 400;
+}
+
+.cta-chat:hover {
+  color: #a5d6a7;
+}
+
 /* Blog home styles */
 .blog-home {
   color: white;
