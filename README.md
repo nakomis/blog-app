@@ -25,7 +25,7 @@ This project is a personal blog at [blog.nakom.is](https://blog.nakom.is), built
 
 ## Architecture Diagram
 
-![Architecture](docs/architecture/blog-app.drawio.svg)
+![Architecture](docs/architecture/blog-app.svg)
 
 ## Repository Layout
 
@@ -130,7 +130,7 @@ git config core.hooksPath .githooks
 To regenerate the SVG manually:
 
 ```bash
-/Applications/draw.io.app/Contents/MacOS/draw.io -x docs/architecture/blog-app.drawio -f svg -s 1 docs/architecture/blog-app.drawio.svg
+/Applications/draw.io.app/Contents/MacOS/draw.io -x docs/architecture/blog-app.drawio -f svg -s 1 docs/architecture/blog-app.svg
 ```
 
 Requires the [draw.io desktop app](https://github.com/jgraph/drawio-desktop/releases) to be installed at `/Applications/draw.io.app`.
