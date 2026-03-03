@@ -1,0 +1,167 @@
+<mxfile host="app.diagrams.net" modified="2026-03-03T00:00:00.000Z" agent="draw.io" version="24.3.1" type="device">
+  <diagram name="blog-app architecture" id="blog-app-arch">
+    <mxGraphModel dx="1422" dy="762" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- Section labels -->
+        <mxCell id="sec-infra-label" value="AWS Infrastructure" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;fontSize=13;fontStyle=1;fontColor=#232F3E;" vertex="1" parent="1">
+          <mxGeometry x="30" y="30" width="200" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="sec-dev-label" value="Development &amp; Deployment" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;fontSize=13;fontStyle=1;fontColor=#232F3E;" vertex="1" parent="1">
+          <mxGeometry x="30" y="430" width="260" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- AWS boundary box -->
+        <mxCell id="aws-box" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#232F3E;strokeWidth=2;dashed=1;verticalAlign=top;align=left;spacingTop=5;spacingLeft=10;fontSize=11;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="200" y="60" width="930" height="340" as="geometry" />
+        </mxCell>
+        <mxCell id="aws-label" value="AWS" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=11;fontStyle=1;fontColor=#232F3E;" vertex="1" parent="1">
+          <mxGeometry x="210" y="65" width="60" height="20" as="geometry" />
+        </mxCell>
+
+        <!-- us-east-1 note -->
+        <mxCell id="useast-box" value="us-east-1" style="text;html=1;strokeColor=#999999;fillColor=#f5f5f5;align=center;verticalAlign=middle;fontSize=9;fontStyle=2;fontColor=#666666;rounded=1;" vertex="1" parent="1">
+          <mxGeometry x="490" y="70" width="80" height="20" as="geometry" />
+        </mxCell>
+
+        <!-- Browser -->
+        <mxCell id="browser" value="Browser" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="30" y="190" width="120" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- Route 53 -->
+        <mxCell id="route53" value="Route 53&#xa;blog.nakom.is" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="240" y="190" width="150" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- ACM Certificate -->
+        <mxCell id="acm" value="ACM Certificate&#xa;(us-east-1)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="480" y="90" width="160" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- CloudFront -->
+        <mxCell id="cloudfront" value="CloudFront Distribution&#xa;blog.nakom.is&#xa;HTTPS redirect, OAC" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="480" y="190" width="200" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- S3 Bucket -->
+        <mxCell id="s3" value="S3 Bucket&#xa;(private, block all public access)&#xa;web/dist/ assets" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="790" y="170" width="210" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- S3 posts path note -->
+        <mxCell id="s3posts" value="/posts/*.md&#xa;(blog markdown served at runtime)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="790" y="280" width="210" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- Arrows: infrastructure -->
+        <mxCell id="e-browser-r53" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="browser" target="route53" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-browser-r53-lbl" value="DNS lookup" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=10;" vertex="1" connectable="0" parent="e-browser-r53">
+          <mxGeometry x="-0.1" y="-1" relative="1" as="geometry"><Array as="offset"><mxPoint x="0" y="-10" /></Array></mxGeometry>
+        </mxCell>
+
+        <mxCell id="e-r53-cf" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="route53" target="cloudfront" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-r53-cf-lbl" value="A alias" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=10;" vertex="1" connectable="0" parent="e-r53-cf">
+          <mxGeometry x="-0.1" y="-1" relative="1" as="geometry"><Array as="offset"><mxPoint x="0" y="-10" /></Array></mxGeometry>
+        </mxCell>
+
+        <mxCell id="e-browser-cf" style="edgeStyle=orthogonalEdgeStyle;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" source="browser" target="cloudfront" parent="1">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="90" y="300" /><mxPoint x="450" y="300" /><mxPoint x="450" y="230" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e-browser-cf-lbl" value="HTTPS" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=10;" vertex="1" connectable="0" parent="e-browser-cf">
+          <mxGeometry x="0.1" relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e-acm-cf" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;" edge="1" source="acm" target="cloudfront" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-acm-cf-lbl" value="TLS cert" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=10;" vertex="1" connectable="0" parent="e-acm-cf">
+          <mxGeometry x="0.5" relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e-cf-s3" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="cloudfront" target="s3" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-cf-s3-lbl" value="S3 origin (OAC)" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=10;" vertex="1" connectable="0" parent="e-cf-s3">
+          <mxGeometry x="-0.1" y="-1" relative="1" as="geometry"><Array as="offset"><mxPoint x="0" y="-10" /></Array></mxGeometry>
+        </mxCell>
+
+        <!-- Dev workflow section -->
+
+        <!-- blog-content submodule -->
+        <mxCell id="blog-content" value="blog-content repo&#xa;(private, git submodule)&#xa;web/content/*.md" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f0f0f0;strokeColor=#999999;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="30" y="490" width="190" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- web/ -->
+        <mxCell id="web" value="web/&#xa;React + Vite + TypeScript&#xa;npm run build" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="290" y="490" width="190" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- web/dist/ -->
+        <mxCell id="dist" value="web/dist/&#xa;(built static assets)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="560" y="490" width="170" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- deploy.sh -->
+        <mxCell id="deploy" value="deploy.sh&#xa;aws s3 sync + invalidate" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="810" y="490" width="180" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- infra/ -->
+        <mxCell id="infra" value="infra/&#xa;AWS CDK (TypeScript)&#xa;cdk deploy" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="290" y="620" width="190" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- AWS Stacks -->
+        <mxCell id="stacks" value="CloudFormation Stacks&#xa;BlogCertStack (us-east-1)&#xa;BlogStack (eu-west-2)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="560" y="620" width="200" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- Dev arrows -->
+        <mxCell id="e-bc-web" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="blog-content" target="web" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-bc-web-lbl" value="git submodule" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=10;" vertex="1" connectable="0" parent="e-bc-web">
+          <mxGeometry x="-0.1" y="-1" relative="1" as="geometry"><Array as="offset"><mxPoint x="0" y="-10" /></Array></mxGeometry>
+        </mxCell>
+
+        <mxCell id="e-web-dist" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="web" target="dist" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e-dist-deploy" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="dist" target="deploy" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e-deploy-s3" style="edgeStyle=orthogonalEdgeStyle;html=1;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" edge="1" source="deploy" target="s3" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-deploy-s3-lbl" value="s3 sync dist/ + content/blog/" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=10;" vertex="1" connectable="0" parent="e-deploy-s3">
+          <mxGeometry x="0.2" relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e-deploy-cf" style="edgeStyle=orthogonalEdgeStyle;html=1;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" edge="1" source="deploy" target="cloudfront" parent="1">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="760" y="530" /><mxPoint x="760" y="230" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e-deploy-cf-lbl" value="invalidate cache" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=10;" vertex="1" connectable="0" parent="e-deploy-cf">
+          <mxGeometry x="0.5" relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e-infra-stacks" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="infra" target="stacks" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-infra-stacks-lbl" value="cdk deploy" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=10;" vertex="1" connectable="0" parent="e-infra-stacks">
+          <mxGeometry x="-0.1" y="-1" relative="1" as="geometry"><Array as="offset"><mxPoint x="0" y="-10" /></Array></mxGeometry>
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
