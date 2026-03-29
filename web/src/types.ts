@@ -3,6 +3,7 @@ export interface BlogPost {
   frontmatter: {
     title: string;
     date: string;
+    publish_date?: string;
     excerpt: string;
     tags: string[];
     author: string;

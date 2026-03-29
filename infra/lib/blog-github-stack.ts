@@ -1,0 +1,60 @@
+import { Stack, StackProps } from 'aws-cdk-lib';
+import * as iam from 'aws-cdk-lib/aws-iam';
+import * as s3 from 'aws-cdk-lib/aws-s3';
+import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
+import { Construct } from 'constructs';
+
+export interface BlogGithubStackProps extends StackProps {
+  readonly bucket: s3.IBucket;
+  readonly distribution: cloudfront.IDistribution;
+}
+
+export class BlogGithubStack extends Stack {
+  constructor(scope: Construct, id: string, props: BlogGithubStackProps) {
+    super(scope, id, props);
+
+    const { bucket, distribution } = props;
+
+    // GitHub Actions OIDC provider.
+    // Only one provider per URL is allowed per AWS account. If
+    // token.actions.githubusercontent.com already exists, replace this with:
+    //   iam.OpenIdConnectProvider.fromOpenIdConnectProviderArn(this, 'GithubOidc',
+    //     `arn:aws:iam::${this.account}:oidc-provider/token.actions.githubusercontent.com`)
+    const githubOidc = new iam.OpenIdConnectProvider(this, 'GithubOidc', {
+      url: 'https://token.actions.githubusercontent.com',
+      clientIds: ['sts.amazonaws.com'],
+      thumbprints: [
+        '6938fd4d98bab03faadb97b34396831e3780aea1',
+        '1c58a3a8518e8759bf075b76b750d4f2df264fcd',
+      ],
+    });
+
+    // IAM role assumed by the blog-app scheduled-publish workflow via OIDC.
+    // Scoped to the nakomis/blog-app repo only.
+    const deployRole = new iam.Role(this, 'BlogDeployRole', {
+      roleName: 'blog-app-github-deploy',
+      assumedBy: new iam.WebIdentityPrincipal(
+        githubOidc.openIdConnectProviderArn,
+        {
+          StringEquals: {
+            'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
+          },
+          StringLike: {
+            'token.actions.githubusercontent.com:sub': 'repo:nakomis/blog-app:*',
+          },
+        }
+      ),
+      description: 'Assumed by GitHub Actions to deploy the blog (S3 sync + CloudFront invalidation)',
+    });
+
+    bucket.grantReadWrite(deployRole);
+    bucket.grantDelete(deployRole);
+
+    deployRole.addToPolicy(new iam.PolicyStatement({
+      actions: ['cloudfront:CreateInvalidation'],
+      resources: [
+        `arn:aws:cloudfront::${this.account}:distribution/${distribution.distributionId}`,
+      ],
+    }));
+  }
+}

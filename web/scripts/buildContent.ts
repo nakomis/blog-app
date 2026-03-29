@@ -48,6 +48,7 @@ async function buildContent() {
 
   console.log(`Processing ${files.length} blog posts...`);
 
+  const today = new Date().toISOString().split('T')[0];
   const posts = [];
 
   for (const file of files) {
@@ -57,6 +58,13 @@ async function buildContent() {
 
     try {
       const post = await processMarkdownContent(content, slug);
+      // publish_date takes priority; fall back to date for existing posts.
+      // If neither is set, or the resolved date is in the future, skip.
+      const publishDate: string | undefined = post.frontmatter.publish_date ?? post.frontmatter.date;
+      if (!publishDate || publishDate > today) {
+        console.log(`⏳ Skipping (${publishDate ?? 'no date'}): ${post.frontmatter.title}`);
+        continue;
+      }
       posts.push(post);
       console.log(`✓ Processed: ${post.frontmatter.title}`);
     } catch (error) {
