@@ -15,19 +15,12 @@ export class BlogGithubStack extends Stack {
 
     const { bucket, distribution } = props;
 
-    // GitHub Actions OIDC provider.
-    // Only one provider per URL is allowed per AWS account. If
-    // token.actions.githubusercontent.com already exists, replace this with:
-    //   iam.OpenIdConnectProvider.fromOpenIdConnectProviderArn(this, 'GithubOidc',
-    //     `arn:aws:iam::${this.account}:oidc-provider/token.actions.githubusercontent.com`)
-    const githubOidc = new iam.OpenIdConnectProvider(this, 'GithubOidc', {
-      url: 'https://token.actions.githubusercontent.com',
-      clientIds: ['sts.amazonaws.com'],
-      thumbprints: [
-        '6938fd4d98bab03faadb97b34396831e3780aea1',
-        '1c58a3a8518e8759bf075b76b750d4f2df264fcd',
-      ],
-    });
+    // Import the existing GitHub Actions OIDC provider (one per account, already
+    // created by another stack).
+    const githubOidc = iam.OpenIdConnectProvider.fromOpenIdConnectProviderArn(
+      this, 'GithubOidc',
+      `arn:aws:iam::${this.account}:oidc-provider/token.actions.githubusercontent.com`,
+    );
 
     // IAM role assumed by the blog-app scheduled-publish workflow via OIDC.
     // Scoped to the nakomis/blog-app repo only.
