@@ -13,9 +13,17 @@ export class BlogCertStack extends cdk.Stack {
       domainName: 'nakom.is',
     });
 
+    const nakomisComZone = route53.HostedZone.fromLookup(this, 'NakomisComZone', {
+      domainName: 'nakomis.com',
+    });
+
     this.certificate = new cm.Certificate(this, 'BlogCert', {
-      domainName: 'blog.nakom.is',
-      validation: cm.CertificateValidation.fromDns(nakomIsZone),
+      domainName: 'blog.nakomis.com',
+      subjectAlternativeNames: ['blog.nakom.is'],
+      validation: cm.CertificateValidation.fromDnsMultiZone({
+        'blog.nakomis.com': nakomisComZone,
+        'blog.nakom.is': nakomIsZone,
+      }),
     });
   }
 }

@@ -19,6 +19,7 @@ This project is a personal blog at [blog.nakom.is](https://blog.nakom.is), built
   * [Local Development](#local-development)
   * [Deployment](#deployment)
 - [Infrastructure](#infrastructure)
+- [SEO](#seo)
 - [Architecture Diagrams](#architecture-diagrams)
 
 <!-- tocstop -->
@@ -56,7 +57,7 @@ git submodule update --init
 
 ### Certificate Manager
 
-The [BlogCertStack](infra/lib/blog-cert-stack.ts) creates an ACM certificate for `blog.nakom.is` in `us-east-1`, as CloudFront requires certificates to be in that region. DNS validation is used, automatically creating the validation records in the `nakom.is` Route53 hosted zone.
+The [BlogCertStack](infra/lib/blog-cert-stack.ts) creates an ACM certificate covering `blog.nakomis.com` (primary) and `blog.nakom.is` (SAN) in `us-east-1`, as CloudFront requires certificates to be in that region. DNS validation is used, automatically creating the validation records in the `nakomis.com` and `nakom.is` Route53 hosted zones respectively.
 
 This stack must be deployed before the main BlogStack since the certificate ARN is passed as a cross-stack reference.
 
@@ -73,15 +74,20 @@ The deployment script syncs two things to the bucket:
 The CloudFront distribution in [BlogStack](infra/lib/blog-stack.ts) sits in front of the S3 bucket and handles:
 
 - **HTTPS enforcement** — all HTTP requests are redirected to HTTPS
+- **Legacy redirect** — requests to `blog.nakom.is` are 301-redirected to `blog.nakomis.com`, preserving the path
 - **SPA routing** — 403 and 404 responses from S3 are rewritten to serve `index.html` with a 200 status, allowing React Router to handle client-side routes
 - **Compression** — assets are gzip/brotli compressed
 - **Caching** — the `CACHING_OPTIMIZED` managed cache policy is used for all behaviours
 
-The ACM certificate is attached to the distribution, covering `blog.nakom.is`.
+The ACM certificate is attached to the distribution, covering both `blog.nakomis.com` and `blog.nakom.is`.
 
 ### Route53
 
-A DNS A alias record is created in the existing `nakom.is` hosted zone pointing `blog.nakom.is` at the CloudFront distribution. The hosted zone is looked up by domain name rather than imported by ID, so no manual configuration is required.
+DNS A alias records are created for both domains:
+- `blog.nakomis.com` in the `nakomis.com` hosted zone
+- `blog.nakom.is` in the `nakom.is` hosted zone
+
+Both point at the same CloudFront distribution. The hosted zones are looked up by domain name rather than imported by ID, so no manual configuration is required.
 
 ## Web App
 
@@ -107,15 +113,33 @@ npm run build                    # build to web/dist/
 bash scripts/deploy.sh           # sync dist/ and content/blog/ to S3, invalidate CloudFront
 ```
 
+`deploy.sh` uses the `nakom.is-admin` AWS profile locally. In GitHub Actions, credentials come from OIDC (no stored secrets).
+
+### Scheduled publishing
+
+A daily GitHub Actions workflow (`.github/workflows/scheduled-publish.yml`) runs at 08:00 UTC. It pulls the latest blog-content submodule, builds, and deploys. Posts with a `publish_date` in the past or present are included; future-dated posts are skipped.
+
+To trigger a deploy immediately (e.g. after a manual content change): **Actions → Publish scheduled posts → Run workflow**.
+
 ## Infrastructure
+
+Three CDK stacks — deploy in order:
 
 ```bash
 cd infra
 npm install
-AWS_PROFILE=nakom.is-admin cdk synth
-AWS_PROFILE=nakom.is-admin cdk deploy BlogCertStack   # us-east-1 cert (first time only)
-AWS_PROFILE=nakom.is-admin cdk deploy BlogStack       # eu-west-2 S3/CloudFront/Route53
+cdk deploy BlogCertStack --profile nakom.is-admin   # us-east-1 cert (first time only)
+cdk deploy BlogStack --profile nakom.is-admin       # eu-west-2 S3/CloudFront/Route53
+cdk deploy BlogGithubStack --profile nakom.is-admin # GitHub OIDC + deploy role (one-time setup)
 ```
+
+`BlogGithubStack` imports the existing `token.actions.githubusercontent.com` OIDC provider rather than creating a new one (only one is allowed per AWS account).
+
+## SEO
+
+The blog generates a sitemap at build time (`/sitemap.xml`) and serves a `robots.txt`. Each post sets its own meta tags and canonical URL via the `canonical` frontmatter field.
+
+The sitemap is submitted to Google Search Console under `sc-domain:nakom.is`. GSC is accessible via the [mcp-gsc](https://github.com/AminForou/mcp-gsc) MCP server, configured in `~/.claude.json` for use with Claude Code.
 
 ## Architecture Diagrams
 
