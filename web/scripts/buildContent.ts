@@ -27,6 +27,8 @@ async function processMarkdownContent(markdownContent: string, slug: string) {
   };
 }
 
+const BASE_URL = 'https://blog.nakomis.com';
+
 async function buildContent() {
   const contentDir = path.join(process.cwd(), 'content', 'blog');
   const outputPath = path.join(process.cwd(), 'src', 'content.generated.ts');
@@ -69,6 +71,27 @@ export const BLOG_POSTS = ${JSON.stringify(posts, null, 2)} as const;
 
   fs.writeFileSync(outputPath, tsContent);
   console.log(`\n✓ Generated content file with ${posts.length} posts`);
+
+  // Generate sitemap.xml
+  const sitemapPath = path.join(process.cwd(), 'public', 'sitemap.xml');
+  const postEntries = posts.map(post => {
+    const url = post.frontmatter.canonical ?? `${BASE_URL}/${post.slug}`;
+    const lastmod = post.frontmatter.date ?? new Date().toISOString().split('T')[0];
+    return `  <url>\n    <loc>${url}</loc>\n    <lastmod>${lastmod}</lastmod>\n  </url>`;
+  }).join('\n');
+
+  const sitemap = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>${BASE_URL}/</loc>
+    <lastmod>${new Date().toISOString().split('T')[0]}</lastmod>
+  </url>
+${postEntries}
+</urlset>
+`;
+
+  fs.writeFileSync(sitemapPath, sitemap);
+  console.log(`✓ Generated sitemap.xml with ${posts.length + 1} URLs`);
 }
 
 buildContent().catch(console.error);

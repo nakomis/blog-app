@@ -1,11 +1,58 @@
+import { useEffect } from 'react';
 import { BlogPost as BlogPostType } from '../types';
 
 interface BlogPostProps {
   post: BlogPostType;
 }
 
+function setMeta(name: string, content: string) {
+  let el = document.querySelector<HTMLMetaElement>(`meta[name="${name}"]`);
+  if (!el) {
+    el = document.createElement('meta');
+    el.name = name;
+    document.head.appendChild(el);
+  }
+  el.content = content;
+}
+
+function setOgMeta(property: string, content: string) {
+  let el = document.querySelector<HTMLMetaElement>(`meta[property="${property}"]`);
+  if (!el) {
+    el = document.createElement('meta');
+    el.setAttribute('property', property);
+    document.head.appendChild(el);
+  }
+  el.content = content;
+}
+
+function setCanonical(url: string) {
+  let el = document.querySelector<HTMLLinkElement>('link[rel="canonical"]');
+  if (!el) {
+    el = document.createElement('link');
+    el.rel = 'canonical';
+    document.head.appendChild(el);
+  }
+  el.href = url;
+}
+
 export default function BlogPost({ post }: BlogPostProps) {
   const { frontmatter, html } = post;
+
+  useEffect(() => {
+    const prev = document.title;
+    document.title = `${frontmatter.title} | Martin Harris`;
+    setMeta('description', frontmatter.excerpt);
+    if (frontmatter.canonical) {
+      setCanonical(frontmatter.canonical);
+      setOgMeta('og:url', frontmatter.canonical);
+    }
+    setOgMeta('og:title', frontmatter.title);
+    setOgMeta('og:description', frontmatter.excerpt);
+    setOgMeta('og:type', 'article');
+    return () => {
+      document.title = prev;
+    };
+  }, [frontmatter]);
 
   return (
     <article className="blog-post">
