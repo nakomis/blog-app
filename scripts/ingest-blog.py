@@ -16,6 +16,7 @@ Usage:
 import json
 import re
 import sys
+from datetime import date
 import boto3
 from pathlib import Path
 
@@ -164,8 +165,14 @@ def main():
         content = download_post(s3, key)
         fm, body = parse_frontmatter(content)
 
+        # Skip posts that aren't published yet
+        publish_date = fm.get("publish_date") or fm.get("date", "")
+        if not publish_date or publish_date > date.today().isoformat():
+            print(f"   Skipping (not yet published: {publish_date or 'no date'})")
+            continue
+
         title    = fm.get("title", slug)
-        date     = fm.get("date", "")
+        post_date = fm.get("date", "")
         post_url = fm.get("canonical", "")
 
         chunks = chunk_body(body)
@@ -182,7 +189,7 @@ def main():
                 "id":          f"{slug}:{i}",
                 "post_slug":   slug,
                 "post_title":  title,
-                "post_date":   date,
+                "post_date":   post_date,
                 "post_url":    post_url,
                 "heading":     heading,
                 "text":        para_text,
