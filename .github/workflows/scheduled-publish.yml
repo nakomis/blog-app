@@ -18,6 +18,11 @@ jobs:
         with:
           submodules: false
 
+      - name: Load blog-content deploy key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.BLOG_CONTENT_DEPLOY_KEY }}
+
       - name: Pull latest blog-content
         run: git submodule update --init --remote web/content
 
