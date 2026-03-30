@@ -5,6 +5,7 @@ import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
 import * as cm from 'aws-cdk-lib/aws-certificatemanager';
 import * as route53 from 'aws-cdk-lib/aws-route53';
 import * as targets from 'aws-cdk-lib/aws-route53-targets';
+import * as ssm from 'aws-cdk-lib/aws-ssm';
 import { Construct } from 'constructs';
 
 const CANONICAL_DOMAIN = 'blog.nakomis.com';
@@ -56,6 +57,13 @@ function handler(event) {
       runtime: cloudfront.FunctionRuntime.JS_2_0,
     });
 
+    // Blog search Lambda Function URL domain — stored in nakom.is ChatStack SSM parameter.
+    // valueFromLookup makes a real SSM API call at synth time so there is no
+    // CloudFormation cross-stack reference between the two CDK apps.
+    const blogSearchDomain = ssm.StringParameter.valueFromLookup(
+      this, '/nakom.is/blog-search-url-domain',
+    );
+
     this.distribution = new cloudfront.Distribution(this, 'BlogDistribution', {
       defaultBehavior: {
         origin: origins.S3BucketOrigin.withOriginAccessControl(this.bucket),
@@ -66,6 +74,20 @@ function handler(event) {
           function: legacyRedirectFunction,
           eventType: cloudfront.FunctionEventType.VIEWER_REQUEST,
         }],
+      },
+      additionalBehaviors: {
+        // Proxy search requests to the blog search Lambda Function URL.
+        // The Lambda itself sets CORS headers; Function URL auth is NONE (public).
+        '/api/search': {
+          origin: new origins.HttpOrigin(blogSearchDomain, {
+            originId: 'BlogSearchOrigin',
+            protocolPolicy: cloudfront.OriginProtocolPolicy.HTTPS_ONLY,
+          }),
+          allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
+          cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
+          originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+          viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+        },
       },
       domainNames: [CANONICAL_DOMAIN, LEGACY_DOMAIN],
       certificate: certificate,
