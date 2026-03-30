@@ -111,7 +111,7 @@ export default function BlogSearch() {
             )}
           </button>
         </div>
-        <p className="search-hint">Powered by semantic search — try a concept, not just keywords</p>
+        <p className="search-hint">Powered by semantic search — try a concept such as &ldquo;voice control&rdquo; or &ldquo;SSL certificates&rdquo;, not just keywords</p>
       </form>
 
       {error && (
