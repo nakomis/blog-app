@@ -1,4 +1,5 @@
 import { BlogPostListItem } from '../types';
+import BlogSearch from './BlogSearch';
 
 interface BlogHomeProps {
   posts: BlogPostListItem[];
@@ -7,6 +8,7 @@ interface BlogHomeProps {
 export default function BlogHome({ posts }: BlogHomeProps) {
   return (
     <div className="blog-home">
+      <BlogSearch />
       <section className="posts">
         <h2>Latest Articles</h2>
         {posts.length === 0 ? (

@@ -5,6 +5,7 @@ import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
 import * as cm from 'aws-cdk-lib/aws-certificatemanager';
 import * as route53 from 'aws-cdk-lib/aws-route53';
 import * as targets from 'aws-cdk-lib/aws-route53-targets';
+import * as ssm from 'aws-cdk-lib/aws-ssm';
 import { Construct } from 'constructs';
 
 const CANONICAL_DOMAIN = 'blog.nakomis.com';
@@ -56,6 +57,16 @@ function handler(event) {
       runtime: cloudfront.FunctionRuntime.JS_2_0,
     });
 
+    // Blog search endpoint — nakom.is API Gateway with a dedicated usage plan (20 req/day).
+    // The API key is injected by CloudFront as x-api-key; it never appears in browser code.
+    // Both values are read from SSM at synth time — no CloudFormation cross-stack dependency.
+    const blogSearchApiDomain = ssm.StringParameter.valueFromLookup(
+      this, '/nakom.is/blog-search-api-domain',
+    );
+    const blogSearchApiKey = ssm.StringParameter.valueFromLookup(
+      this, '/nakom.is/blog-search-api-key',
+    );
+
     this.distribution = new cloudfront.Distribution(this, 'BlogDistribution', {
       defaultBehavior: {
         origin: origins.S3BucketOrigin.withOriginAccessControl(this.bucket),
@@ -66,6 +77,23 @@ function handler(event) {
           function: legacyRedirectFunction,
           eventType: cloudfront.FunctionEventType.VIEWER_REQUEST,
         }],
+      },
+      additionalBehaviors: {
+        // Proxy search requests to the nakom.is API Gateway.
+        // CloudFront injects x-api-key — it never appears in browser code.
+        // originPath '/prod' + CloudFront URI '/api/search' → API GW resource '/api/search'.
+        '/api/search': {
+          origin: new origins.HttpOrigin(blogSearchApiDomain, {
+            originId: 'BlogSearchOrigin',
+            protocolPolicy: cloudfront.OriginProtocolPolicy.HTTPS_ONLY,
+            originPath: '/prod',
+            customHeaders: { 'x-api-key': blogSearchApiKey },
+          }),
+          allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
+          cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
+          originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+          viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+        },
       },
       domainNames: [CANONICAL_DOMAIN, LEGACY_DOMAIN],
       certificate: certificate,

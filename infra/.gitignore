@@ -5,3 +5,5 @@ cdk-*.out/
 *.tsbuildinfo
 .DS_Store
 *.swp
+# Contains SSM secret values resolved at synth time — never commit
+cdk.context.json
