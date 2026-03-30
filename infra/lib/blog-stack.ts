@@ -57,11 +57,14 @@ function handler(event) {
       runtime: cloudfront.FunctionRuntime.JS_2_0,
     });
 
-    // Blog search Lambda Function URL domain — stored in nakom.is ChatStack SSM parameter.
-    // valueFromLookup makes a real SSM API call at synth time so there is no
-    // CloudFormation cross-stack reference between the two CDK apps.
-    const blogSearchDomain = ssm.StringParameter.valueFromLookup(
-      this, '/nakom.is/blog-search-url-domain',
+    // Blog search endpoint — nakom.is API Gateway with a dedicated usage plan (20 req/day).
+    // The API key is injected by CloudFront as x-api-key; it never appears in browser code.
+    // Both values are read from SSM at synth time — no CloudFormation cross-stack dependency.
+    const blogSearchApiDomain = ssm.StringParameter.valueFromLookup(
+      this, '/nakom.is/blog-search-api-domain',
+    );
+    const blogSearchApiKey = ssm.StringParameter.valueFromLookup(
+      this, '/nakom.is/blog-search-api-key',
     );
 
     this.distribution = new cloudfront.Distribution(this, 'BlogDistribution', {
@@ -76,12 +79,15 @@ function handler(event) {
         }],
       },
       additionalBehaviors: {
-        // Proxy search requests to the blog search Lambda Function URL.
-        // The Lambda itself sets CORS headers; Function URL auth is NONE (public).
+        // Proxy search requests to the nakom.is API Gateway.
+        // CloudFront injects x-api-key — it never appears in browser code.
+        // originPath '/prod' + CloudFront URI '/api/search' → API GW resource '/api/search'.
         '/api/search': {
-          origin: new origins.HttpOrigin(blogSearchDomain, {
+          origin: new origins.HttpOrigin(blogSearchApiDomain, {
             originId: 'BlogSearchOrigin',
             protocolPolicy: cloudfront.OriginProtocolPolicy.HTTPS_ONLY,
+            originPath: '/prod',
+            customHeaders: { 'x-api-key': blogSearchApiKey },
           }),
           allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
           cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,

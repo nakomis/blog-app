@@ -36,6 +36,10 @@ export default function BlogSearch() {
         body: JSON.stringify({ query: trimmed }),
       });
 
+      if (response.status === 429) {
+        throw new Error('Search is temporarily disabled due to global usage quotas');
+      }
+
       if (!response.ok) {
         throw new Error(`Search failed (${response.status})`);
       }
