@@ -50,3 +50,14 @@ jobs:
       - name: Deploy
         run: bash scripts/deploy.sh
         working-directory: web
+
+      - name: Set up Python for ingestion
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install ingestion dependencies
+        run: pip install boto3
+
+      - name: Regenerate search embeddings
+        run: python scripts/ingest-blog.py

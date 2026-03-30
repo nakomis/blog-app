@@ -49,5 +49,15 @@ export class BlogGithubStack extends Stack {
         `arn:aws:cloudfront::${this.account}:distribution/${distribution.distributionId}`,
       ],
     }));
+
+    // Ingestion script: write embeddings to the private bucket
+    const privateBucket = s3.Bucket.fromBucketName(this, 'PrivateBucket', 'nakom.is-private');
+    privateBucket.grantPut(deployRole);
+
+    // Ingestion script: embed via Bedrock Titan Embed v2
+    deployRole.addToPolicy(new iam.PolicyStatement({
+      actions: ['bedrock:InvokeModel'],
+      resources: ['arn:aws:bedrock:us-east-1::foundation-model/amazon.titan-embed-text-v2:0'],
+    }));
   }
 }
