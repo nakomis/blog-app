@@ -67,9 +67,11 @@ function handler(event) {
       this, '/nakom.is/blog-search-api-key',
     );
 
+    const s3Origin = origins.S3BucketOrigin.withOriginAccessControl(this.bucket);
+
     this.distribution = new cloudfront.Distribution(this, 'BlogDistribution', {
       defaultBehavior: {
-        origin: origins.S3BucketOrigin.withOriginAccessControl(this.bucket),
+        origin: s3Origin,
         viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
         cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
         compress: true,
@@ -79,6 +81,13 @@ function handler(event) {
         }],
       },
       additionalBehaviors: {
+        // Serve blog post images directly from S3 with aggressive caching.
+        '/images/*': {
+          origin: s3Origin,
+          viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+          cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
+          compress: true,
+        },
         // Proxy search requests to the nakom.is API Gateway.
         // CloudFront injects x-api-key — it never appears in browser code.
         // originPath '/prod' + CloudFront URI '/api/search' → API GW resource '/api/search'.
