@@ -50,6 +50,35 @@ export class BlogGithubStack extends Stack {
       ],
     }));
 
+    // IAM role assumed by the blog-content sync-images workflow via OIDC.
+    // Scoped to nakomis/blog-content only; permissions limited to images/* prefix.
+    const contentImagesRole = new iam.Role(this, 'BlogContentImagesRole', {
+      roleName: 'blog-content-github-images',
+      assumedBy: new iam.WebIdentityPrincipal(
+        githubOidc.openIdConnectProviderArn,
+        {
+          StringEquals: {
+            'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
+          },
+          StringLike: {
+            'token.actions.githubusercontent.com:sub': 'repo:nakomis/blog-content:*',
+          },
+        }
+      ),
+      description: 'Assumed by GitHub Actions in blog-content to sync images to S3',
+    });
+
+    contentImagesRole.addToPolicy(new iam.PolicyStatement({
+      actions: ['s3:PutObject', 's3:DeleteObject'],
+      resources: [bucket.arnForObjects('images/*')],
+    }));
+
+    contentImagesRole.addToPolicy(new iam.PolicyStatement({
+      actions: ['s3:ListBucket'],
+      resources: [bucket.bucketArn],
+      conditions: { StringLike: { 's3:prefix': ['images/*'] } },
+    }));
+
     // Ingestion script: write embeddings to the private bucket
     const privateBucket = s3.Bucket.fromBucketName(this, 'PrivateBucket', 'nakom.is-private');
     privateBucket.grantPut(deployRole);
