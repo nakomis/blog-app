@@ -499,6 +499,30 @@ a:hover {
   border: 1px solid rgba(25, 118, 210, 0.2);
 }
 
+.post-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.5rem 0;
+  font-size: 0.95rem;
+}
+
+.post-content th,
+.post-content td {
+  padding: 0.6rem 1rem;
+  text-align: left;
+  border: 1px solid #2a2a2a;
+}
+
+.post-content th {
+  background-color: #1a1a1a;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.post-content tr:nth-child(even) {
+  background-color: rgba(255, 255, 255, 0.03);
+}
+
 .post-content blockquote {
   border-left: 4px solid #1976d2;
   padding-left: 1.5rem;
