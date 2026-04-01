@@ -62,6 +62,37 @@ npm install
 npm run dev    # http://localhost:5173
 ```
 
+## Semantic search / RAG pipeline
+
+Blog posts are chunked and embedded so the chat assistant and search UI can do semantic retrieval.
+
+### How it works
+
+1. `scripts/ingest-blog.py` — run manually (or trigger via GitHub Actions) after new posts are published. It:
+   - Downloads all published `.md` posts from `BLOG_BUCKET` (`blog-nakom-is-eu-west-2-637423226886`)
+   - Splits each post into overlapping chunks using LangChain's `MarkdownTextSplitter` (700 char chunks, 80 char overlap)
+   - Embeds each chunk via **Amazon Titan Embed v2** (`amazon.titan-embed-text-v2:0`, 1024 dims, Bedrock us-east-1)
+   - Writes chunk text/metadata to the **`blog-chunks` DynamoDB table** (keyed on chunk ID, e.g. `my-post:3`)
+   - Uploads a compact `blog-embeddings.json` to `nakom.is-private` S3 — contains only chunk IDs, base64-encoded Float32 embeddings, post slugs, and tags (~230 KB for 7 posts vs ~3.5 MB previously)
+
+2. The **chat and blog-search Lambdas** (`nakom.is` repo → `lambda/chat/blog-retriever.ts`):
+   - Load `blog-embeddings.json` at cold start, decoding embeddings to `Float32Array` in memory
+   - Embed the user query via Titan, run cosine similarity scan (threshold 0.3, top 4, deduplicated by post)
+   - Fetch the matching chunk text/metadata from DynamoDB via `BatchGetItem`
+
+3. The **blog search UI** (wired to `/api/search` CloudFront behaviour) calls the same Lambda endpoint.
+
+### Architecture rationale
+Separating embeddings (S3) from text (DynamoDB) keeps the cold-start file small regardless of blog growth. Binary-encoding the Float32 embeddings reduces the S3 file ~60% vs JSON decimal arrays. DynamoDB cost is effectively zero at personal blog traffic levels.
+
+### Re-running the ingest
+
+```bash
+AWS_PROFILE=nakom.is-admin python scripts/ingest-blog.py
+```
+
+Run this whenever new posts are published (if not automated via GitHub Actions).
+
 ## Google Search Console (MCP)
 
 The `gsc` MCP server is configured in `~/.claude.json` and connects to Google Search Console via OAuth. Credentials are at `/Users/nakomis/repos/AminForou/mcp-gsc/client_secrets.json` (gitignored).
