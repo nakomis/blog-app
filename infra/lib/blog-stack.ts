@@ -69,6 +69,36 @@ function handler(event) {
 
     const s3Origin = origins.S3BucketOrigin.withOriginAccessControl(this.bucket);
 
+    // Hotlink protection for /images/*: requests whose Referer is not one of our
+    // own domains are redirected to /images/hotlink.png instead.
+    // Direct loads (no Referer) are allowed — that's us browsing.
+    const hotlinkProtectionFunction = new cloudfront.Function(this, 'HotlinkProtection', {
+      functionName: 'blog-image-hotlink-protection',
+      code: cloudfront.FunctionCode.fromInline(`
+function handler(event) {
+  var request = event.request;
+  var referer = (request.headers['referer'] || {}).value || '';
+
+  var isOwnSite = !referer
+    || referer.indexOf('blog.nakomis.com') !== -1
+    || referer.indexOf('blog.nakom.is') !== -1
+    || referer.indexOf('localhost') !== -1;
+
+  // Pass through the hotlink image itself to avoid an infinite redirect loop
+  if (!isOwnSite && request.uri !== '/images/hotlink.png') {
+    return {
+      statusCode: 302,
+      statusDescription: 'Found',
+      headers: { location: { value: '/images/hotlink.png' } }
+    };
+  }
+
+  return request;
+}
+`),
+      runtime: cloudfront.FunctionRuntime.JS_2_0,
+    });
+
     this.distribution = new cloudfront.Distribution(this, 'BlogDistribution', {
       defaultBehavior: {
         origin: s3Origin,
@@ -87,6 +117,10 @@ function handler(event) {
           viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
           cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
           compress: true,
+          functionAssociations: [{
+            function: hotlinkProtectionFunction,
+            eventType: cloudfront.FunctionEventType.VIEWER_REQUEST,
+          }],
         },
         // Proxy search requests to the nakom.is API Gateway.
         // CloudFront injects x-api-key — it never appears in browser code.
