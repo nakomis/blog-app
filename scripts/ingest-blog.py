@@ -2,33 +2,45 @@
 """
 Blog RAG ingestion script.
 
-Downloads blog posts from S3, chunks at paragraph level (with section heading
-context prepended to each chunk), embeds via Ollama (nomic-embed-text), and
-uploads blog-embeddings.json to the private S3 bucket.
+Downloads blog posts from S3, splits them into overlapping chunks using
+LangChain's MarkdownTextSplitter, embeds each chunk via Amazon Titan Embed v2
+(Bedrock), then:
 
-The chat Lambda reads this file at cold start and uses it for cosine similarity
-search against Bedrock Titan-embedded user queries.
+  - Writes text/metadata for each chunk to the DynamoDB `blog-chunks` table
+    (keyed on chunk ID).
+  - Uploads a compact `blog-embeddings.json` to the private S3 bucket
+    containing only chunk IDs and base64-encoded Float32 embeddings (plus the
+    post_slug and post_tags needed for deduplication and HyDE tag expansion).
+
+The chat Lambda loads the small S3 file at cold start, runs cosine similarity
+to find the top-K chunk IDs, then fetches the matching text/metadata from
+DynamoDB via BatchGetItem.
 
 Usage:
-    AWS_PROFILE=nakom.is python utils/ingest-blog.py
+    AWS_PROFILE=nakom.is-admin python scripts/ingest-blog.py
 """
 
+import base64
 import json
 import re
+import struct
 import sys
 from datetime import date
 import boto3
 from pathlib import Path
+from langchain_text_splitters import MarkdownTextSplitter
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
 BLOG_BUCKET    = "blog-nakom-is-eu-west-2-637423226886"
 PRIVATE_BUCKET = "nakom.is-private"
 EMBEDDINGS_KEY = "blog-embeddings.json"
+CHUNKS_TABLE   = "blog-chunks"
 BEDROCK_REGION = "us-east-1"
 EMBED_MODEL    = "amazon.titan-embed-text-v2:0"
 EMBED_DIMS     = 1024
-MIN_PARA_CHARS = 80   # paragraphs shorter than this are merged with the next
+CHUNK_SIZE     = 700  # characters per chunk
+CHUNK_OVERLAP  = 80   # overlap between consecutive chunks
 
 
 # ── Embedding ─────────────────────────────────────────────────────────────────
@@ -41,6 +53,11 @@ def embed(bedrock, text: str) -> list[float]:
         accept="application/json",
     )
     return json.loads(response["body"].read())["embedding"]
+
+
+def encode_embedding(vector: list[float]) -> str:
+    """Pack a float list as a base64-encoded Float32 binary string."""
+    return base64.b64encode(struct.pack(f"{len(vector)}f", *vector)).decode()
 
 
 # ── S3 helpers ────────────────────────────────────────────────────────────────
@@ -78,69 +95,34 @@ def parse_frontmatter(content: str) -> tuple[dict, str]:
     return fm, body
 
 
-def chunk_body(body: str) -> list[tuple[str, str]]:
+_splitter = MarkdownTextSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
+
+
+def chunk_body(body: str) -> list[str]:
+    """Split a post body into chunks using LangChain's MarkdownTextSplitter.
+
+    Splits on markdown structure (headings, code fences, paragraphs) in priority
+    order, falling back to sentences then words. Overlap between chunks preserves
+    context across boundaries.
     """
-    Split a post body into (heading, paragraph_text) tuples.
+    return _splitter.split_text(body)
 
-    Rules:
-    - Code blocks are skipped (they need surrounding context to make sense,
-      and embedding raw code produces poor retrieval signal).
-    - Each chunk is prefixed with the most recent H2/H3 heading so the
-      embedding carries topical context.
-    - Paragraphs shorter than MIN_PARA_CHARS are merged with the next.
-    """
-    chunks: list[tuple[str, str]] = []   # (heading, text)
-    current_heading = ""
-    current_lines: list[str] = []
-    in_code_block = False
 
-    def flush():
-        text = " ".join(current_lines).strip()
-        if text:
-            chunks.append((current_heading, text))
-        current_lines.clear()
+def extract_heading(chunk: str) -> str:
+    """Return the text of the first heading line in a chunk, or empty string."""
+    first_line = chunk.split("\n")[0]
+    m = re.match(r"^#{1,3}\s+(.+)", first_line)
+    return m.group(1).strip() if m else ""
 
-    for line in body.splitlines():
-        # Track code fences
-        if line.startswith("```"):
-            in_code_block = not in_code_block
-            flush()
-            continue
-        if in_code_block:
-            continue
 
-        # Detect headings — update context, flush current paragraph
-        heading_match = re.match(r"^(#{1,3})\s+(.+)", line)
-        if heading_match:
-            flush()
-            level = len(heading_match.group(1))
-            if level <= 3:
-                current_heading = heading_match.group(2).strip()
-            continue
+# ── DynamoDB helpers ──────────────────────────────────────────────────────────
 
-        # Blank line = paragraph boundary
-        if not line.strip():
-            flush()
-            continue
-
-        current_lines.append(line.strip())
-
-    flush()
-
-    # Merge short paragraphs upward into the next
-    merged: list[tuple[str, str]] = []
-    i = 0
-    while i < len(chunks):
-        heading, text = chunks[i]
-        if len(text) < MIN_PARA_CHARS and i + 1 < len(chunks):
-            next_heading, next_text = chunks[i + 1]
-            merged.append((heading, text + " " + next_text))
-            i += 2
-        else:
-            merged.append((heading, text))
-            i += 1
-
-    return merged
+def write_chunks_to_ddb(ddb, records: list[dict]) -> None:
+    """Batch-write chunk metadata records to DynamoDB."""
+    table = ddb.Table(CHUNKS_TABLE)
+    with table.batch_writer() as batch:
+        for record in records:
+            batch.put_item(Item=record)
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -148,6 +130,7 @@ def chunk_body(body: str) -> list[tuple[str, str]]:
 def main():
     s3      = boto3.client("s3")
     bedrock = boto3.client("bedrock-runtime", region_name=BEDROCK_REGION)
+    ddb     = boto3.resource("dynamodb")
 
     print("Listing blog posts...")
     keys = list_post_keys(s3)
@@ -156,7 +139,10 @@ def main():
         sys.exit(1)
     print(f"Found {len(keys)} post(s)")
 
-    records: list[dict] = []
+    # S3 records: id + binary embedding + fields needed client-side (dedup, HyDE tags)
+    s3_records:  list[dict] = []
+    # DDB records: id + full text/metadata (fetched after cosine search)
+    ddb_records: list[dict] = []
 
     for key in sorted(keys):
         slug = Path(key).stem
@@ -171,38 +157,50 @@ def main():
             print(f"   Skipping (not yet published: {publish_date or 'no date'})")
             continue
 
-        title    = fm.get("title", slug)
+        title     = fm.get("title", slug)
         post_date = fm.get("date", "")
-        post_url = fm.get("canonical", "")
+        post_url  = fm.get("canonical", "")
+        tags      = re.findall(r'"([^"]+)"', fm.get("tags", ""))
 
         chunks = chunk_body(body)
         print(f"   {len(chunks)} chunk(s)")
 
-        for i, (heading, para_text) in enumerate(chunks):
-            # Prepend heading so the embedding carries topical context
-            embed_input = f"{heading}\n\n{para_text}" if heading else para_text
+        for i, chunk_text in enumerate(chunks):
+            chunk_id = f"{slug}:{i}"
+            heading  = extract_heading(chunk_text)
 
             print(f"   embedding {i + 1}/{len(chunks)}...", end="\r", flush=True)
-            vector = embed(bedrock, embed_input)
+            vector = embed(bedrock, chunk_text)
 
-            records.append({
-                "id":          f"{slug}:{i}",
-                "post_slug":   slug,
-                "post_title":  title,
-                "post_date":   post_date,
-                "post_url":    post_url,
-                "heading":     heading,
-                "text":        para_text,
-                "embedding":   vector,
+            s3_records.append({
+                "id":        chunk_id,
+                "post_slug": slug,
+                "post_tags": tags,
+                "embedding": encode_embedding(vector),
+            })
+
+            ddb_records.append({
+                "id":         chunk_id,
+                "post_slug":  slug,
+                "post_title": title,
+                "post_date":  post_date,
+                "post_url":   post_url,
+                "heading":    heading,
+                "text":       chunk_text,
             })
 
         print(f"   {len(chunks)} chunk(s) embedded    ")
 
-    print(f"\nTotal chunks: {len(records)}")
+    total = len(s3_records)
+    print(f"\nTotal chunks: {total}")
 
-    payload = json.dumps(records, separators=(",", ":"))
-    size_kb = len(payload.encode()) / 1024
-    print(f"Payload size: {size_kb:.1f} KB")
+    print(f"Writing {total} chunk(s) to DynamoDB table '{CHUNKS_TABLE}'...")
+    write_chunks_to_ddb(ddb, ddb_records)
+    print("DynamoDB write complete.")
+
+    payload  = json.dumps(s3_records, separators=(",", ":"))
+    size_kb  = len(payload.encode()) / 1024
+    print(f"S3 payload size: {size_kb:.1f} KB")
 
     print(f"Uploading to s3://{PRIVATE_BUCKET}/{EMBEDDINGS_KEY} ...")
     s3.put_object(
