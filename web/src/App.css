@@ -526,11 +526,16 @@ a:hover {
 .post-content img {
   max-width: 100%;
   max-height: 400px;
-  display: block;
-  margin: 1.5rem auto;
   border-radius: 8px;
   cursor: pointer;
   object-fit: contain;
+  vertical-align: middle;
+  margin: 4px;
+}
+
+.post-content p:has(> img) {
+  text-align: center;
+  margin: 1.5rem 0;
 }
 
 .lightbox {
