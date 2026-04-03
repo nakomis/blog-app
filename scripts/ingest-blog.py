@@ -12,6 +12,11 @@ LangChain's MarkdownTextSplitter, embeds each chunk via Amazon Titan Embed v2
     containing only chunk IDs and base64-encoded Float32 embeddings (plus the
     post_slug and post_tags needed for deduplication and HyDE tag expansion).
 
+Incremental processing: a content-hash manifest (`ingest-manifest.json`) in
+the private bucket tracks the SHA-256 of each post at last ingest. Only posts
+whose content has changed (or that are new) are re-embedded. Unchanged posts
+are skipped entirely; their existing records are preserved as-is.
+
 The chat Lambda loads the small S3 file at cold start, runs cosine similarity
 to find the top-K chunk IDs, then fetches the matching text/metadata from
 DynamoDB via BatchGetItem.
@@ -21,6 +26,7 @@ Usage:
 """
 
 import base64
+import hashlib
 import json
 import re
 import struct
@@ -35,6 +41,7 @@ from langchain_text_splitters import MarkdownTextSplitter
 BLOG_BUCKET    = "blog-nakom-is-eu-west-2-637423226886"
 PRIVATE_BUCKET = "nakom.is-private"
 EMBEDDINGS_KEY = "blog-embeddings.json"
+MANIFEST_KEY   = "ingest-manifest.json"
 CHUNKS_TABLE   = "blog-chunks"
 BEDROCK_REGION = "us-east-1"
 EMBED_MODEL    = "amazon.titan-embed-text-v2:0"
@@ -75,6 +82,32 @@ def list_post_keys(s3) -> list[str]:
 def download_post(s3, key: str) -> str:
     obj = s3.get_object(Bucket=BLOG_BUCKET, Key=key)
     return obj["Body"].read().decode("utf-8")
+
+
+def load_json_from_s3(s3, bucket: str, key: str, default):
+    try:
+        obj = s3.get_object(Bucket=bucket, Key=key)
+        return json.loads(obj["Body"].read().decode("utf-8"))
+    except s3.exceptions.NoSuchKey:
+        return default
+    except Exception:
+        return default
+
+
+def upload_json_to_s3(s3, bucket: str, key: str, data) -> None:
+    payload = json.dumps(data, separators=(",", ":"))
+    s3.put_object(
+        Bucket=bucket,
+        Key=key,
+        Body=payload.encode(),
+        ContentType="application/json",
+    )
+
+
+# ── Hashing ───────────────────────────────────────────────────────────────────
+
+def content_hash(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()
 
 
 # ── Parsing ───────────────────────────────────────────────────────────────────
@@ -125,6 +158,16 @@ def write_chunks_to_ddb(ddb, records: list[dict]) -> None:
             batch.put_item(Item=record)
 
 
+def delete_chunks_from_ddb(ddb, chunk_ids: list[str]) -> None:
+    """Batch-delete chunk records from DynamoDB by ID."""
+    if not chunk_ids:
+        return
+    table = ddb.Table(CHUNKS_TABLE)
+    with table.batch_writer() as batch:
+        for chunk_id in chunk_ids:
+            batch.delete_item(Key={"id": chunk_id})
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -139,23 +182,74 @@ def main():
         sys.exit(1)
     print(f"Found {len(keys)} post(s)")
 
-    # S3 records: id + binary embedding + fields needed client-side (dedup, HyDE tags)
-    s3_records:  list[dict] = []
-    # DDB records: id + full text/metadata (fetched after cosine search)
-    ddb_records: list[dict] = []
+    print("Loading manifest and existing embeddings...")
+    manifest         = load_json_from_s3(s3, PRIVATE_BUCKET, MANIFEST_KEY, {})
+    existing_records = load_json_from_s3(s3, PRIVATE_BUCKET, EMBEDDINGS_KEY, [])
+
+    # Index existing embedding records by slug for fast lookup
+    old_records_by_slug: dict[str, list[dict]] = {}
+    for record in existing_records:
+        old_records_by_slug.setdefault(record["post_slug"], []).append(record)
+
+    # ── First pass: determine which slugs need reprocessing ──────────────────
+
+    today_str = date.today().isoformat()
+    live_posts: dict[str, tuple[dict, str, str]] = {}  # slug -> (fm, body, hash)
 
     for key in sorted(keys):
-        slug = Path(key).stem
-        print(f"\n── {slug}")
-
+        slug    = Path(key).stem
         content = download_post(s3, key)
         fm, body = parse_frontmatter(content)
 
-        # Skip posts that aren't published yet
         publish_date = fm.get("publish_date") or fm.get("date", "")
-        if not publish_date or publish_date > date.today().isoformat():
-            print(f"   Skipping (not yet published: {publish_date or 'no date'})")
-            continue
+        if not publish_date or publish_date > today_str:
+            continue  # not yet published
+
+        live_posts[slug] = (fm, body, content_hash(content))
+
+    slugs_to_reprocess = {
+        slug for slug, (_, _, h) in live_posts.items()
+        if manifest.get(slug) != h
+    }
+    slugs_removed = set(old_records_by_slug) - set(live_posts)
+
+    unchanged = len(live_posts) - len(slugs_to_reprocess)
+    print(f"  {unchanged} post(s) unchanged — skipping")
+    print(f"  {len(slugs_to_reprocess)} post(s) to embed: {sorted(slugs_to_reprocess) or 'none'}")
+    if slugs_removed:
+        print(f"  {len(slugs_removed)} post(s) removed from index: {sorted(slugs_removed)}")
+
+    if not slugs_to_reprocess and not slugs_removed:
+        print("Nothing to do.")
+        return
+
+    # ── Delete old DynamoDB chunks for changed/removed slugs ─────────────────
+
+    slugs_to_clean = slugs_to_reprocess | slugs_removed
+    old_ids_to_delete = [
+        r["id"]
+        for slug in slugs_to_clean
+        for r in old_records_by_slug.get(slug, [])
+    ]
+    if old_ids_to_delete:
+        print(f"Deleting {len(old_ids_to_delete)} stale chunk(s) from DynamoDB...")
+        delete_chunks_from_ddb(ddb, old_ids_to_delete)
+
+    # ── Keep embedding records for unchanged slugs ────────────────────────────
+
+    kept_records = [
+        r for r in existing_records
+        if r["post_slug"] not in slugs_to_clean
+    ]
+
+    # ── Second pass: embed changed/new posts ──────────────────────────────────
+
+    new_s3_records:  list[dict] = []
+    new_ddb_records: list[dict] = []
+
+    for slug in sorted(slugs_to_reprocess):
+        fm, body, h = live_posts[slug]
+        print(f"\n── {slug}")
 
         title     = fm.get("title", slug)
         post_date = fm.get("date", "")
@@ -172,14 +266,14 @@ def main():
             print(f"   embedding {i + 1}/{len(chunks)}...", end="\r", flush=True)
             vector = embed(bedrock, chunk_text)
 
-            s3_records.append({
+            new_s3_records.append({
                 "id":        chunk_id,
                 "post_slug": slug,
                 "post_tags": tags,
                 "embedding": encode_embedding(vector),
             })
 
-            ddb_records.append({
+            new_ddb_records.append({
                 "id":         chunk_id,
                 "post_slug":  slug,
                 "post_title": title,
@@ -190,25 +284,37 @@ def main():
             })
 
         print(f"   {len(chunks)} chunk(s) embedded    ")
+        manifest[slug] = h
 
-    total = len(s3_records)
-    print(f"\nTotal chunks: {total}")
+    # ── Write results ─────────────────────────────────────────────────────────
 
-    print(f"Writing {total} chunk(s) to DynamoDB table '{CHUNKS_TABLE}'...")
-    write_chunks_to_ddb(ddb, ddb_records)
-    print("DynamoDB write complete.")
+    if new_ddb_records:
+        print(f"\nWriting {len(new_ddb_records)} new chunk(s) to DynamoDB...")
+        write_chunks_to_ddb(ddb, new_ddb_records)
+        print("DynamoDB write complete.")
 
-    payload  = json.dumps(s3_records, separators=(",", ":"))
+    final_records = kept_records + new_s3_records
+    total = len(final_records)
+
+    # Remove manifest entries for slugs that are no longer live
+    for slug in slugs_removed:
+        manifest.pop(slug, None)
+
+    payload  = json.dumps(final_records, separators=(",", ":"))
     size_kb  = len(payload.encode()) / 1024
-    print(f"S3 payload size: {size_kb:.1f} KB")
+    print(f"\nTotal chunks in index: {total} ({size_kb:.1f} KB)")
 
-    print(f"Uploading to s3://{PRIVATE_BUCKET}/{EMBEDDINGS_KEY} ...")
+    print(f"Uploading embeddings to s3://{PRIVATE_BUCKET}/{EMBEDDINGS_KEY} ...")
     s3.put_object(
         Bucket=PRIVATE_BUCKET,
         Key=EMBEDDINGS_KEY,
         Body=payload.encode(),
         ContentType="application/json",
     )
+
+    print(f"Uploading manifest to s3://{PRIVATE_BUCKET}/{MANIFEST_KEY} ...")
+    upload_json_to_s3(s3, PRIVATE_BUCKET, MANIFEST_KEY, manifest)
+
     print("Done.")
 
 
