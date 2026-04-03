@@ -4,3 +4,4 @@ dist/
 .DS_Store
 *.swp
 src/content.generated.ts
+public/sitemap.xml
