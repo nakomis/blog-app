@@ -54,6 +54,8 @@ cd web && npm run build
 bash scripts/deploy.sh
 ```
 
+**Important:** always update the submodule before running `deploy.sh`. The deploy script uses `--delete` when syncing posts to S3, so a stale submodule will wipe any posts that aren't checked out locally.
+
 ## Local development
 
 ```bash
@@ -77,7 +79,7 @@ Blog posts are chunked and embedded so the chat assistant and search UI can do s
 
 2. The **chat and blog-search Lambdas** (`nakom.is` repo → `lambda/chat/blog-retriever.ts`):
    - Load `blog-embeddings.json` at cold start, decoding embeddings to `Float32Array` in memory
-   - Embed the user query via Titan, run cosine similarity scan (threshold 0.3, top 4, deduplicated by post)
+   - Embed the user query via Titan, run cosine similarity scan (threshold 0.22, top 4, deduplicated by post)
    - Fetch the matching chunk text/metadata from DynamoDB via `BatchGetItem`
 
 3. The **blog search UI** (wired to `/api/search` CloudFront behaviour) calls the same Lambda endpoint.
