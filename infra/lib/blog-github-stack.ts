@@ -80,9 +80,10 @@ export class BlogGithubStack extends Stack {
       conditions: { StringLike: { 's3:prefix': ['images/*'] } },
     }));
 
-    // Ingestion script: write embeddings to the private bucket
+    // Ingestion script: read and write embeddings/manifest to the private bucket
     const privateBucket = s3.Bucket.fromBucketName(this, 'PrivateBucket', 'nakom.is-private');
     privateBucket.grantPut(deployRole);
+    privateBucket.grantRead(deployRole);
 
     // Ingestion script: embed via Bedrock Titan Embed v2
     deployRole.addToPolicy(new iam.PolicyStatement({
