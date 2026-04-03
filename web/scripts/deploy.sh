@@ -19,8 +19,12 @@ aws s3 sync dist/ "s3://${BUCKET}/" --delete "${AWS_PROFILE_ARGS[@]}"
 echo "Syncing blog posts to S3..."
 aws s3 sync content/blog/ "s3://${BUCKET}/posts/" --delete --exclude "*" --include "*.md" "${AWS_PROFILE_ARGS[@]}"
 
-echo "Syncing blog images to S3..."
-aws s3 sync content/blog/images/ "s3://${BUCKET}/images/" "${AWS_PROFILE_ARGS[@]}"
+if [ -d content/blog/images ]; then
+  echo "Syncing blog images to S3..."
+  aws s3 sync content/blog/images/ "s3://${BUCKET}/images/" "${AWS_PROFILE_ARGS[@]}"
+else
+  echo "No local images directory, skipping image sync."
+fi
 
 echo "Invalidating CloudFront cache..."
 aws cloudfront create-invalidation \
