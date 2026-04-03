@@ -90,7 +90,8 @@ def load_json_from_s3(s3, bucket: str, key: str, default):
         return json.loads(obj["Body"].read().decode("utf-8"))
     except s3.exceptions.NoSuchKey:
         return default
-    except Exception:
+    except Exception as e:
+        print(f"  Warning: could not load s3://{bucket}/{key}: {e}")
         return default
 
 
