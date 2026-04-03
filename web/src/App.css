@@ -523,6 +523,12 @@ a:hover {
   background-color: rgba(255, 255, 255, 0.03);
 }
 
+.post-content hr {
+  margin: 2rem 0;
+  border: none;
+  border-top: 1px solid #404040;
+}
+
 .post-content blockquote {
   border-left: 4px solid #1976d2;
   padding-left: 1.5rem;
