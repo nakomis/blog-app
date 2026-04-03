@@ -252,10 +252,11 @@ def main():
         fm, body, h = live_posts[slug]
         print(f"\n── {slug}")
 
-        title     = fm.get("title", slug)
-        post_date = fm.get("date", "")
-        post_url  = fm.get("canonical", "")
-        tags      = re.findall(r'"([^"]+)"', fm.get("tags", ""))
+        title        = fm.get("title", slug)
+        post_date    = fm.get("date", "")
+        post_url     = fm.get("canonical", "")
+        post_excerpt = fm.get("excerpt", "")
+        tags         = re.findall(r'"([^"]+)"', fm.get("tags", ""))
 
         chunks = chunk_body(body)
         print(f"   {len(chunks)} chunk(s)")
@@ -275,13 +276,14 @@ def main():
             })
 
             new_ddb_records.append({
-                "id":         chunk_id,
-                "post_slug":  slug,
-                "post_title": title,
-                "post_date":  post_date,
-                "post_url":   post_url,
-                "heading":    heading,
-                "text":       chunk_text,
+                "id":           chunk_id,
+                "post_slug":    slug,
+                "post_title":   title,
+                "post_date":    post_date,
+                "post_url":     post_url,
+                "post_excerpt": post_excerpt,
+                "heading":      heading,
+                "text":         chunk_text,
             })
 
         print(f"   {len(chunks)} chunk(s) embedded    ")
