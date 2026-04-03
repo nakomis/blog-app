@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { BlogPost as BlogPostType } from '../types';
 
 interface BlogPostProps {
@@ -37,6 +37,8 @@ function setCanonical(url: string) {
 
 export default function BlogPost({ post }: BlogPostProps) {
   const { frontmatter, html } = post;
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
 
   useEffect(() => {
     const prev = document.title;
@@ -53,6 +55,19 @@ export default function BlogPost({ post }: BlogPostProps) {
       document.title = prev;
     };
   }, [frontmatter]);
+
+  useEffect(() => {
+    const el = contentRef.current;
+    if (!el) return;
+    const imgs = el.querySelectorAll<HTMLImageElement>('img');
+    const handlers: Array<() => void> = [];
+    imgs.forEach(img => {
+      const handler = () => setLightboxSrc(img.src);
+      img.addEventListener('click', handler);
+      handlers.push(() => img.removeEventListener('click', handler));
+    });
+    return () => handlers.forEach(cleanup => cleanup());
+  }, [html]);
 
   return (
     <article className="blog-post">
@@ -78,6 +93,7 @@ export default function BlogPost({ post }: BlogPostProps) {
       </header>
 
       <div
+        ref={contentRef}
         className="post-content"
         dangerouslySetInnerHTML={{ __html: html }}
       />
@@ -88,6 +104,12 @@ export default function BlogPost({ post }: BlogPostProps) {
           <a href={frontmatter.canonical}>{frontmatter.canonical}</a>
         </p>
       </footer>
+
+      {lightboxSrc && (
+        <div className="lightbox" onClick={() => setLightboxSrc(null)}>
+          <img src={lightboxSrc} alt="" />
+        </div>
+      )}
     </article>
   );
 }
