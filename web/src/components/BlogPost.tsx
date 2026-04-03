@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { BlogPost as BlogPostType } from '../types';
 
 interface BlogPostProps {
@@ -37,7 +37,6 @@ function setCanonical(url: string) {
 
 export default function BlogPost({ post }: BlogPostProps) {
   const { frontmatter, html } = post;
-  const contentRef = useRef<HTMLDivElement>(null);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
 
   useEffect(() => {
@@ -56,18 +55,12 @@ export default function BlogPost({ post }: BlogPostProps) {
     };
   }, [frontmatter]);
 
-  useEffect(() => {
-    const el = contentRef.current;
-    if (!el) return;
-    const imgs = el.querySelectorAll<HTMLImageElement>('img');
-    const handlers: Array<() => void> = [];
-    imgs.forEach(img => {
-      const handler = () => setLightboxSrc(img.src);
-      img.addEventListener('click', handler);
-      handlers.push(() => img.removeEventListener('click', handler));
-    });
-    return () => handlers.forEach(cleanup => cleanup());
-  }, [html]);
+  function handleContentClick(e: React.MouseEvent<HTMLDivElement>) {
+    const target = e.target as HTMLElement;
+    if (target.tagName === 'IMG') {
+      setLightboxSrc((target as HTMLImageElement).src);
+    }
+  }
 
   return (
     <article className="blog-post">
@@ -93,9 +86,9 @@ export default function BlogPost({ post }: BlogPostProps) {
       </header>
 
       <div
-        ref={contentRef}
         className="post-content"
         dangerouslySetInnerHTML={{ __html: html }}
+        onClick={handleContentClick}
       />
 
       <footer className="post-footer">
