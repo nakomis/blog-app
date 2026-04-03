@@ -3,10 +3,12 @@ import remarkParse from 'remark-parse';
 import remarkFrontmatter from 'remark-frontmatter';
 import remarkGfm from 'remark-gfm';
 import remarkRehype from 'remark-rehype';
+import rehypeRaw from 'rehype-raw';
 import rehypeHighlight from 'rehype-highlight';
 import rehypeStringify from 'rehype-stringify';
 import matter from 'gray-matter';
 import { BlogPost, BlogPostListItem } from '../types';
+import { applyShortcodes } from '../shortcodes';
 import { BLOG_POSTS } from '../content.generated';
 
 export async function getBlogPosts(): Promise<BlogPost[]> {
@@ -37,11 +39,12 @@ export async function processMarkdown(markdownContent: string, slug: string): Pr
     .use(remarkParse)
     .use(remarkFrontmatter)
     .use(remarkGfm)
-    .use(remarkRehype)
+    .use(remarkRehype, { allowDangerousHtml: true })
+    .use(rehypeRaw)
     .use(rehypeHighlight)
     .use(rehypeStringify);
 
-  const result = await processor.process(content);
+  const result = await processor.process(applyShortcodes(content));
 
   return {
     slug,
