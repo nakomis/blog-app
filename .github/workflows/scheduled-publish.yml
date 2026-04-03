@@ -59,7 +59,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install ingestion dependencies
-        run: pip install boto3
+        run: pip install -r scripts/requirements.txt
 
       - name: Regenerate search embeddings
         run: python scripts/ingest-blog.py
