@@ -144,7 +144,7 @@ export default function BlogSearch() {
                       {result.postTitle}
                     </a>
                   </h3>
-                  {result.heading && (
+                  {result.heading && result.heading !== result.postTitle && (
                     <p className="search-result-heading">{result.heading}</p>
                   )}
                   <div className="post-meta">
