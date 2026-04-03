@@ -5,9 +5,11 @@ import remarkParse from 'remark-parse';
 import remarkFrontmatter from 'remark-frontmatter';
 import remarkGfm from 'remark-gfm';
 import remarkRehype from 'remark-rehype';
+import rehypeRaw from 'rehype-raw';
 import rehypeHighlight from 'rehype-highlight';
 import rehypeStringify from 'rehype-stringify';
 import matter from 'gray-matter';
+import { applyShortcodes } from '../src/shortcodes.js';
 
 async function processMarkdownContent(markdownContent: string, slug: string) {
   const { data: frontmatter, content } = matter(markdownContent);
@@ -16,11 +18,12 @@ async function processMarkdownContent(markdownContent: string, slug: string) {
     .use(remarkParse)
     .use(remarkFrontmatter)
     .use(remarkGfm)
-    .use(remarkRehype)
+    .use(remarkRehype, { allowDangerousHtml: true })
+    .use(rehypeRaw)
     .use(rehypeHighlight)
     .use(rehypeStringify);
 
-  const result = await processor.process(content);
+  const result = await processor.process(applyShortcodes(content));
 
   return {
     slug,
