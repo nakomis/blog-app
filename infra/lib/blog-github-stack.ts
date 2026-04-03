@@ -2,6 +2,7 @@ import { Stack, StackProps } from 'aws-cdk-lib';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
+import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import { Construct } from 'constructs';
 
 export interface BlogGithubStackProps extends StackProps {
@@ -88,5 +89,10 @@ export class BlogGithubStack extends Stack {
       actions: ['bedrock:InvokeModel'],
       resources: ['arn:aws:bedrock:us-east-1::foundation-model/amazon.titan-embed-text-v2:0'],
     }));
+
+    // Allow the deploy role to write to the DynamoDB table where blog chunks are stored
+    const blogChunkTable = dynamodb.Table.fromTableName(this, 'BlogChunkTable', 'blog-chunks');
+    blogChunkTable.grantWriteData(deployRole);
+
   }
 }
