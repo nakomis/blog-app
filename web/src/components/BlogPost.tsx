@@ -92,18 +92,6 @@ export default function BlogPost({ post }: BlogPostProps) {
       />
 
       <footer className="post-footer">
-        {frontmatter.repos && frontmatter.repos.length > 0 && (
-          <div className="post-repos">
-            <strong>Source code</strong>
-            <ul>
-              {frontmatter.repos.map(repo => (
-                <li key={repo.url}>
-                  <a href={repo.url} target="_blank" rel="noopener noreferrer">{repo.name}</a>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
         <p>
           <strong>Canonical URL:</strong>{' '}
           <a href={frontmatter.canonical}>{frontmatter.canonical}</a>

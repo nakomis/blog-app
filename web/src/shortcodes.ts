@@ -1,3 +1,7 @@
+import { BlogPost } from './types';
+
+type Frontmatter = BlogPost['frontmatter'];
+
 const shortcodes: Record<string, string> = {
   donate: `<hr />
 <p>If you find this blog useful, please consider a donation.</p>
@@ -8,8 +12,18 @@ const shortcodes: Record<string, string> = {
 </form>`,
 };
 
-export function applyShortcodes(markdown: string): string {
+function renderRepos(repos: NonNullable<Frontmatter['repos']>): string {
+  const items = repos
+    .map(r => `<li><a href="${r.url}" target="_blank" rel="noopener noreferrer">${r.name}</a></li>`)
+    .join('');
+  return `<div class="post-repos"><strong>Source code</strong><ul>${items}</ul></div>`;
+}
+
+export function applyShortcodes(markdown: string, frontmatter?: Frontmatter): string {
   return markdown.replace(/\{\{(\w+)\}\}/g, (match, name) => {
+    if (name === 'repos') {
+      return frontmatter?.repos?.length ? renderRepos(frontmatter.repos) : '';
+    }
     return shortcodes[name] ?? match;
   });
 }
