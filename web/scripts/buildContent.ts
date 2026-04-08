@@ -23,7 +23,7 @@ async function processMarkdownContent(markdownContent: string, slug: string) {
     .use(rehypeHighlight)
     .use(rehypeStringify);
 
-  const result = await processor.process(applyShortcodes(content));
+  const result = await processor.process(applyShortcodes(content, frontmatter as Parameters<typeof applyShortcodes>[1]));
 
   return {
     slug,
