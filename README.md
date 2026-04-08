@@ -2,6 +2,12 @@
 
 This project is a personal blog at [blog.nakom.is](https://blog.nakom.is), built as a React/Vite single-page application served via CloudFront from a private S3 bucket. Blog post content lives in a separate private repository linked as a git submodule, keeping the infrastructure and content concerns cleanly separated.
 
+## Support
+
+If you find this useful, please consider buying me a coffee:
+
+[![Donate with PayPal](https://www.paypalobjects.com/en_GB/i/btn/btn_donate_SM.gif)](https://www.paypal.com/donate?hosted_button_id=Q3BESC73EWVNN)
+
 ## Table of Contents
 
 <!-- toc -->
@@ -158,3 +164,9 @@ To regenerate the SVG manually:
 ```
 
 Requires the [draw.io desktop app](https://github.com/jgraph/drawio-desktop/releases) to be installed at `/Applications/draw.io.app`.
+
+## Support
+
+If you find this useful, please consider buying me a coffee:
+
+[![Donate with PayPal](https://www.paypalobjects.com/en_GB/i/btn/btn_donate_SM.gif)](https://www.paypal.com/donate?hosted_button_id=Q3BESC73EWVNN)
