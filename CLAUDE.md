@@ -51,7 +51,7 @@ git commit -m "chore: update blog-content submodule"
 cd web && npm run build
 
 # 3. Deploy to S3 and invalidate CloudFront
-bash scripts/deploy.sh
+bash web/scripts/deploy.sh
 ```
 
 **Important:** always update the submodule before running `deploy.sh`. The deploy script uses `--delete` when syncing posts to S3, so a stale submodule will wipe any posts that aren't checked out locally.
