@@ -8,6 +8,7 @@ export interface BlogPost {
     tags: string[];
     author: string;
     canonical: string;
+    repos?: Array<{ name: string; url: string }>;
   };
   html: string;
 }

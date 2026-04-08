@@ -567,6 +567,21 @@ a:hover {
   margin-top: 2rem;
 }
 
+.post-repos {
+  margin-bottom: 1.5rem;
+}
+
+.post-repos ul {
+  margin: 0.5rem 0 0 0;
+  padding-left: 1.5rem;
+}
+
+.post-content iframe {
+  max-width: 100%;
+  display: block;
+  margin: 1.5rem 0;
+}
+
 .post-content blockquote {
   border-left: 4px solid #1976d2;
   padding-left: 1.5rem;
