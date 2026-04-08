@@ -44,7 +44,7 @@ export async function processMarkdown(markdownContent: string, slug: string): Pr
     .use(rehypeHighlight)
     .use(rehypeStringify);
 
-  const result = await processor.process(applyShortcodes(content));
+  const result = await processor.process(applyShortcodes(content, frontmatter as BlogPost['frontmatter']));
 
   return {
     slug,
