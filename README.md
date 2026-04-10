@@ -6,7 +6,7 @@ This project is a personal blog at [blog.nakom.is](https://blog.nakom.is), built
 
 If you find this useful, please consider buying me a coffee:
 
-[![Donate with PayPal](https://www.paypalobjects.com/en_GB/i/btn/btn_donate_SM.gif)](https://www.paypal.com/donate?hosted_button_id=Q3BESC73EWVNN)
+[![Donate with PayPal](https://www.paypalobjects.com/en_GB/i/btn/btn_donate_SM.gif)](https://www.paypal.com/donate?hosted_button_id=Q3BESC73EWVNN&custom=blog-app)
 
 ## Table of Contents
 
@@ -169,4 +169,4 @@ Requires the [draw.io desktop app](https://github.com/jgraph/drawio-desktop/rele
 
 If you find this useful, please consider buying me a coffee:
 
-[![Donate with PayPal](https://www.paypalobjects.com/en_GB/i/btn/btn_donate_SM.gif)](https://www.paypal.com/donate?hosted_button_id=Q3BESC73EWVNN)
+[![Donate with PayPal](https://www.paypalobjects.com/en_GB/i/btn/btn_donate_SM.gif)](https://www.paypal.com/donate?hosted_button_id=Q3BESC73EWVNN&custom=blog-app)
