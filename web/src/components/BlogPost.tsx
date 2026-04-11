@@ -67,8 +67,8 @@ export default function BlogPost({ post }: BlogPostProps) {
       <header className="post-header">
         <h1>{frontmatter.title}</h1>
         <div className="post-meta">
-          <time dateTime={frontmatter.date}>
-            {new Date(frontmatter.date).toLocaleDateString('en-GB', {
+          <time dateTime={frontmatter.publish_date ?? frontmatter.date}>
+            {new Date(frontmatter.publish_date ?? frontmatter.date).toLocaleDateString('en-GB', {
               year: 'numeric',
               month: 'long',
               day: 'numeric',

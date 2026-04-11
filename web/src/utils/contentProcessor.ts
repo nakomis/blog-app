@@ -25,11 +25,11 @@ export function getBlogPostList(posts: BlogPost[]): BlogPostListItem[] {
     .map(post => ({
       slug: post.slug,
       title: post.frontmatter.title,
-      date: post.frontmatter.date,
+      publishDate: post.frontmatter.publish_date ?? post.frontmatter.date,
       excerpt: post.frontmatter.excerpt,
       tags: post.frontmatter.tags,
     }))
-    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    .sort((a, b) => new Date(b.publishDate).getTime() - new Date(a.publishDate).getTime());
 }
 
 export async function processMarkdown(markdownContent: string, slug: string): Promise<BlogPost> {

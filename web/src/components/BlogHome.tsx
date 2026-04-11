@@ -21,8 +21,8 @@ export default function BlogHome({ posts }: BlogHomeProps) {
                   <a href={`/${post.slug}`} className="post-card-link">{post.title}</a>
                 </h3>
                 <div className="post-meta">
-                  <time dateTime={post.date}>
-                    {new Date(post.date).toLocaleDateString('en-GB', {
+                  <time dateTime={post.publishDate}>
+                    {new Date(post.publishDate).toLocaleDateString('en-GB', {
                       year: 'numeric',
                       month: 'long',
                       day: 'numeric',

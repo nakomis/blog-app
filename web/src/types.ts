@@ -16,7 +16,7 @@ export interface BlogPost {
 export interface BlogPostListItem {
   slug: string;
   title: string;
-  date: string;
+  publishDate: string;
   excerpt: string;
   tags: string[];
 }
