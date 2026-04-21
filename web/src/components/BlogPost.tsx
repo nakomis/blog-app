@@ -40,6 +40,23 @@ export default function BlogPost({ post }: BlogPostProps) {
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
 
   useEffect(() => {
+    const diagrams = document.querySelectorAll<HTMLElement>('code.language-mermaid');
+    if (diagrams.length === 0) return;
+    import('mermaid').then(({ default: mermaid }) => {
+      mermaid.initialize({ startOnLoad: false, theme: 'default' });
+      diagrams.forEach(async (code, i) => {
+        const source = code.textContent ?? '';
+        const id = `mermaid-${Date.now()}-${i}`;
+        const { svg } = await mermaid.render(id, source);
+        const wrapper = document.createElement('div');
+        wrapper.className = 'mermaid-diagram';
+        wrapper.innerHTML = svg;
+        code.parentElement?.replaceWith(wrapper);
+      });
+    });
+  }, [html]);
+
+  useEffect(() => {
     const prev = document.title;
     document.title = `${frontmatter.title} | Martin Harris`;
     setMeta('description', frontmatter.excerpt);
