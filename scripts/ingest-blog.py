@@ -8,9 +8,10 @@ LangChain's MarkdownTextSplitter, embeds each chunk via Amazon Titan Embed v2
 
   - Writes text/metadata for each chunk to the DynamoDB `blog-chunks` table
     (keyed on chunk ID).
-  - Uploads a compact `blog-embeddings.json` to the private S3 bucket
-    containing only chunk IDs and base64-encoded Float32 embeddings (plus the
-    post_slug and post_tags needed for deduplication and HyDE tag expansion).
+  - Uploads `blog-embeddings.json` to the private S3 bucket containing chunk
+    IDs, base64-encoded Float32 embeddings, post_slug/tags, and all text
+    metadata (title, date, url, heading, text) so the Lambda can serve fulltext
+    and hybrid search without a DynamoDB Scan.
 
 Incremental processing: a content-hash manifest (`ingest-manifest.json`) in
 the private bucket tracks the SHA-256 of each post at last ingest. Only posts
@@ -220,10 +221,6 @@ def main():
     if slugs_removed:
         print(f"  {len(slugs_removed)} post(s) removed from index: {sorted(slugs_removed)}")
 
-    if not slugs_to_reprocess and not slugs_removed:
-        print("Nothing to do.")
-        return
-
     # ── Delete old DynamoDB chunks for changed/removed slugs ─────────────────
 
     slugs_to_clean = slugs_to_reprocess | slugs_removed
@@ -242,6 +239,27 @@ def main():
         r for r in existing_records
         if r["post_slug"] not in slugs_to_clean
     ]
+
+    # ── Migrate kept records that pre-date text-in-S3 (one-time backfill) ─────
+    # Old S3 records only have id/post_slug/post_tags/embedding. If any kept
+    # record is missing 'text', fetch the missing fields from DynamoDB.
+
+    needs_backfill = [r for r in kept_records if not r.get("text")]
+    if needs_backfill:
+        print(f"Backfilling text fields for {len(needs_backfill)} kept record(s) from DynamoDB...")
+        table = ddb.Table(CHUNKS_TABLE)
+        for r in needs_backfill:
+            item = table.get_item(Key={"id": r["id"]}).get("Item", {})
+            r["post_title"]   = item.get("post_title",   "")
+            r["post_date"]    = item.get("post_date",    "")
+            r["post_url"]     = item.get("post_url",     "")
+            r["post_excerpt"] = item.get("post_excerpt", "")
+            r["heading"]      = item.get("heading",      "")
+            r["text"]         = item.get("text",         "")
+        print("Backfill complete.")
+    elif not slugs_to_reprocess and not slugs_removed:
+        print("Nothing to do.")
+        return
 
     # ── Second pass: embed changed/new posts ──────────────────────────────────
 
@@ -269,10 +287,16 @@ def main():
             vector = embed(bedrock, chunk_text)
 
             new_s3_records.append({
-                "id":        chunk_id,
-                "post_slug": slug,
-                "post_tags": tags,
-                "embedding": encode_embedding(vector),
+                "id":           chunk_id,
+                "post_slug":    slug,
+                "post_tags":    tags,
+                "post_title":   title,
+                "post_date":    post_date,
+                "post_url":     post_url,
+                "post_excerpt": post_excerpt,
+                "heading":      heading,
+                "text":         chunk_text,
+                "embedding":    encode_embedding(vector),
             })
 
             new_ddb_records.append({
