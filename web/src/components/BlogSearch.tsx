@@ -1,5 +1,25 @@
 import { useState, useRef, FormEvent, KeyboardEvent } from 'react';
 
+type SearchMode = 'hybrid' | 'semantic' | 'fulltext';
+
+const MODES: { value: SearchMode; label: string; description: string }[] = [
+  {
+    value: 'hybrid',
+    label: 'Hybrid',
+    description: 'Best of both — combines semantic understanding with exact keyword matching. A good default for most searches.',
+  },
+  {
+    value: 'semantic',
+    label: 'Semantic',
+    description: 'Understands concepts and meaning rather than exact words. Describe what you\'re looking for — e.g. "voice control" rather than a specific function name.',
+  },
+  {
+    value: 'fulltext',
+    label: 'Full-Text',
+    description: 'Exact keyword matching. Ideal for specific terms, error messages, or quoted phrases.',
+  },
+];
+
 interface SearchResult {
   id: string;
   postSlug: string;
@@ -16,6 +36,7 @@ interface SearchResponse {
 
 export default function BlogSearch() {
   const [query, setQuery] = useState('');
+  const [mode, setMode] = useState<SearchMode>('hybrid');
   const [results, setResults] = useState<SearchResult[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -33,7 +54,7 @@ export default function BlogSearch() {
       const response = await fetch('/api/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: trimmed }),
+        body: JSON.stringify({ query: trimmed, mode }),
       });
 
       if (response.status === 429) {
@@ -115,7 +136,24 @@ export default function BlogSearch() {
             )}
           </button>
         </div>
-        <p className="search-hint">Powered by semantic search — try a concept such as &ldquo;voice control&rdquo; or &ldquo;SSL certificates&rdquo;, not just keywords</p>
+        <div className="search-mode-row">
+          <div className="search-mode-buttons" role="group" aria-label="Search mode">
+            {MODES.map(m => (
+              <button
+                key={m.value}
+                type="button"
+                className={`search-mode-btn${mode === m.value ? ' active' : ''}`}
+                onClick={() => setMode(m.value)}
+                aria-pressed={mode === m.value}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+          <p className="search-hint">
+            {MODES.find(m => m.value === mode)!.description}
+          </p>
+        </div>
       </form>
 
       {error && (
