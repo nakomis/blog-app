@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import 'source-map-support/register';
 import * as cdk from 'aws-cdk-lib';
+import * as fs from 'fs';
 import { BlogCertStack } from '../lib/blog-cert-stack';
 import { BlogStack } from '../lib/blog-stack';
 import { BlogGithubStack } from '../lib/blog-github-stack';
@@ -30,4 +31,6 @@ new BlogGithubStack(app, 'BlogGithubStack', {
   distribution: blogStack.distribution,
 });
 
+const { version: infraVersion } = JSON.parse(fs.readFileSync('./version.json', 'utf-8'));
 cdk.Tags.of(app).add('MH-Project', 'blog-app');
+cdk.Tags.of(app).add('MH-Version', infraVersion);
