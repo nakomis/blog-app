@@ -91,9 +91,9 @@ export class BlogGithubStack extends Stack {
       resources: ['arn:aws:bedrock:us-east-1::foundation-model/amazon.titan-embed-text-v2:0'],
     }));
 
-    // Allow the deploy role to write to the DynamoDB table where blog chunks are stored
+    // Allow the deploy role to read and write the DynamoDB table where blog chunks are stored
     const blogChunkTable = dynamodb.Table.fromTableName(this, 'BlogChunkTable', 'blog-chunks');
-    blogChunkTable.grantWriteData(deployRole);
+    blogChunkTable.grantReadWriteData(deployRole);
 
   }
 }
