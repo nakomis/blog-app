@@ -63,11 +63,17 @@ async function buildContent() {
 
     try {
       const post = await processMarkdownContent(content, slug);
-      // publish_date takes priority; fall back to date for existing posts.
-      // If neither is set, or the resolved date is in the future, skip.
+      // A post goes live only once it is BOTH approved in the review pipeline
+      // (blog-pipeline PIPE-5 stamps `approved: true` when it promotes the post
+      // back here) AND its publish_date has arrived. The approval gate is
+      // fail-closed: anything without `approved: true` — a draft, an unreviewed
+      // push, a post mid-review — stays unpublished. publish_date takes priority
+      // over date; if neither is set the post is skipped.
+      const approved = post.frontmatter.approved === true;
       const publishDate: string | undefined = post.frontmatter.publish_date ?? post.frontmatter.date;
-      if (!publishDate || publishDate > today) {
-        console.log(`⏳ Skipping (${publishDate ?? 'no date'}): ${post.frontmatter.title}`);
+      if (!approved || !publishDate || publishDate > today) {
+        const reason = !approved ? 'not approved' : (publishDate ?? 'no date');
+        console.log(`⏳ Skipping (${reason}): ${post.frontmatter.title}`);
         continue;
       }
       posts.push(post);
