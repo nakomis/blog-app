@@ -203,8 +203,12 @@ def main():
         content = download_post(s3, key)
         fm, body = parse_frontmatter(content)
 
+        # Only embed posts that are live on the blog: approved in the review
+        # pipeline (PIPE-5) AND past their publish_date. parse_frontmatter keeps
+        # values as strings, so `approved: true` arrives as "true".
+        approved = str(fm.get("approved", "")).strip().lower() == "true"
         publish_date = fm.get("publish_date") or fm.get("date", "")
-        if not publish_date or publish_date > today_str:
+        if not approved or not publish_date or publish_date > today_str:
             continue  # not yet published
 
         live_posts[slug] = (fm, body, content_hash(content))
