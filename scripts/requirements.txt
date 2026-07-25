@@ -1,2 +1,4 @@
 boto3
 langchain-text-splitters
+python-substack==0.1.27
+requests
