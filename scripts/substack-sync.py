@@ -35,6 +35,7 @@ import json
 import os
 import re
 import sys
+import time
 
 import boto3
 import requests
@@ -108,7 +109,12 @@ def live_posts(content_dir: str) -> list[dict]:
 
 
 def substack_archive() -> list[dict]:
-    """All posts already on the publication, via the public archive API."""
+    """Posts on the publication via the PUBLIC archive API.
+
+    CDN-cached and can lag several minutes behind reality — fine for dry runs,
+    NOT safe as the idempotency check before publishing (learnt the hard way:
+    a stale archive re-published five posts' worth of duplicates as drafts).
+    """
     out, offset = [], 0
     while True:
         r = requests.get(
@@ -122,6 +128,25 @@ def substack_archive() -> list[dict]:
             return out
         out.extend({"slug": p["slug"], "title": p.get("title", "")} for p in page)
         offset += len(page)
+
+
+def published_posts(api) -> list[dict]:
+    """Posts on the publication via the authenticated API — never cached."""
+    out, offset, limit = [], 0, 25
+    while True:
+        page = api.get_published_posts(offset=offset, limit=limit)
+        items = page if isinstance(page, list) else page.get("posts", [])
+        out.extend({"slug": p["slug"], "title": p.get("title", "")} for p in items)
+        if len(items) < limit:
+            return out
+        offset += len(items)
+
+
+def subtitle_for(excerpt: str, limit: int = 140) -> str:
+    """Substack rejects long subtitles; cut at a word boundary under the limit."""
+    if len(excerpt) <= limit:
+        return excerpt
+    return excerpt[:limit - 1].rsplit(" ", 1)[0] + "…"
 
 
 def prepare_markdown(post: dict) -> str:
@@ -176,7 +201,7 @@ def publish_post(api, post: dict, send: bool, dry_run: bool) -> None:
     result = api.create_draft_from_markdown(
         title=post["title"],
         markdown=prepare_markdown(post),
-        subtitle=post["excerpt"][:280],
+        subtitle=subtitle_for(post["excerpt"]),
         slug=post["slug"],
         search_engine_description=post["excerpt"][:300] or None,
         publish=False,
@@ -188,14 +213,19 @@ def publish_post(api, post: dict, send: bool, dry_run: bool) -> None:
         api.delete_draft(draft_id)
         sys.exit(f"error: {post['slug']} draft contains un-uploaded image paths; aborting")
 
-    # Best-effort: keep the blog's publish date on the mirrored post.
-    try:
-        api.put_draft(draft_id, post_date=f"{post['publish_date']}T08:00:00.000Z")
-    except Exception as err:  # noqa: BLE001 — cosmetic; never block publication
-        print(f"warn: could not set post_date on {post['slug']}: {err}", file=sys.stderr)
-
     api.prepublish_draft(draft_id)
     api.publish_draft(draft_id, send=send, share_automatically=False)
+
+    # Substack only allows changing post_date on a published post, and the
+    # change needs a re-publish (send=False → no email) to take effect. Only
+    # bother when the blog date isn't today, i.e. for backfilled history.
+    if post["publish_date"] != datetime.date.today().isoformat():
+        try:
+            api.put_draft(draft_id, post_date=f"{post['publish_date']}T08:00:00.000Z")
+            api.publish_draft(draft_id, send=False, share_automatically=False)
+        except Exception as err:  # noqa: BLE001 — cosmetic; never block publication
+            print(f"warn: could not set post_date on {post['slug']}: {err}", file=sys.stderr)
+
     print(f"published: {post['slug']} ({action})")
 
 
@@ -210,7 +240,12 @@ def main() -> None:
     os.chdir(args.content_dir)
 
     live = live_posts(".")
-    existing = substack_archive()
+    api = None
+    if args.dry_run:
+        existing = substack_archive()
+    else:
+        api = connect(load_session_cookie())
+        existing = published_posts(api)
     existing_slugs = {p["slug"] for p in existing}
     existing_titles = {norm_title(p["title"]) for p in existing}
 
@@ -230,19 +265,17 @@ def main() -> None:
             f"Would-be sends: {[p['slug'] for p in sends]}"
         )
 
-    api = None
-    if not args.dry_run:
-        api = connect(load_session_cookie())
-
-    for post in missing:
+    for i, post in enumerate(missing):
+        if i and not args.dry_run:
+            time.sleep(15)  # image uploads + draft creation trip Substack's rate limit
         publish_post(api, post, send=post["slug"] not in NO_EMAIL_SLUGS, dry_run=args.dry_run)
 
     if not args.dry_run:
-        # Belt and braces: confirm everything we just published is in the archive.
-        after = {p["slug"] for p in substack_archive()}
+        # Belt and braces: confirm everything we just published is really there.
+        after = {p["slug"] for p in published_posts(api)}
         failed = [p["slug"] for p in missing if p["slug"] not in after]
         if failed:
-            sys.exit(f"error: published but not visible in archive: {failed}")
+            sys.exit(f"error: published but not visible in published list: {failed}")
         print("Substack mirror in sync.")
 
 
