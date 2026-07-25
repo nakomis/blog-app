@@ -63,3 +63,8 @@ jobs:
 
       - name: Regenerate search embeddings
         run: python scripts/ingest-blog.py
+
+      # Mirror any newly-live posts to nakomis.substack.com (PIPE-11). Runs
+      # last so a Substack failure can never block the blog deploy itself.
+      - name: Mirror new posts to Substack
+        run: python scripts/substack-sync.py --content-dir web/content/blog

@@ -95,5 +95,24 @@ export class BlogGithubStack extends Stack {
     const blogChunkTable = dynamodb.Table.fromTableName(this, 'BlogChunkTable', 'blog-chunks');
     blogChunkTable.grantReadWriteData(deployRole);
 
+    // Substack mirror (PIPE-11): the sync script reads the session cookie and
+    // credentials from SSM at runtime. The SecureString parameters themselves
+    // are created out of band (CloudFormation can neither create nor adopt
+    // SecureStrings — same deploy-first/populate-second pattern as the
+    // blog-pipeline reviewer keys).
+    deployRole.addToPolicy(new iam.PolicyStatement({
+      actions: ['ssm:GetParameter'],
+      resources: [
+        `arn:aws:ssm:${this.region}:${this.account}:parameter/blog/prod/substack/*`,
+      ],
+    }));
+    deployRole.addToPolicy(new iam.PolicyStatement({
+      actions: ['kms:Decrypt'],
+      resources: ['*'],
+      conditions: {
+        StringEquals: { 'kms:ViaService': `ssm.${this.region}.amazonaws.com` },
+      },
+    }));
+
   }
 }
