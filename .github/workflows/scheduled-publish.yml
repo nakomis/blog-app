@@ -112,6 +112,11 @@ jobs:
       - name: Mirror new posts to Substack
         run: .venv/bin/python scripts/substack-sync.py --content-dir web/content/blog
 
+      # Announce at most one new post on Bluesky (PIPE-20): post-cutoff posts
+      # only, 3-day minimum gap, idempotent against the profile's own feed.
+      - name: Announce on Bluesky
+        run: .venv/bin/python scripts/bluesky-announce.py --content-dir web/content/blog
+
       # No aws CLI on this runner — publish the alert with the venv's boto3.
       - name: Alert on failure
         if: failure()
