@@ -71,10 +71,18 @@ def candidate_posts(content_dir: str) -> list[dict]:
             continue
         if publish_date < CUTOFF_DATE:
             continue
+        # Opt-out: unticking "announce on Bluesky" in the bag makes promote
+        # stamp this into the frontmatter (PIPE-20).
+        if str(fm.get("bluesky_announce", "true")).strip().lower() == "false":
+            continue
+        with open(os.path.join(content_dir, name), encoding="utf-8") as fh:
+            raw = fh.read()
+        body = raw.split("\n---", 2)[-1] if raw.startswith("---\n") else raw
         posts.append({
             "slug": name[:-3],
             "title": fm.get("title", name[:-3]),
             "excerpt": fm.get("excerpt", ""),
+            "body": body,
             "publish_date": publish_date,
             "url": f"{SUBSTACK_URL}/p/{name[:-3]}",
         })
@@ -140,7 +148,52 @@ def og_image(url: str) -> bytes | None:
         return None
 
 
+BEDROCK_MODEL = os.environ.get("BLUESKY_TEASER_MODEL", "eu.anthropic.claude-sonnet-4-6")
+
+TEASER_PROMPT = """Write a Bluesky post announcing this blog post. It links to the article, so \
+its job is to make someone curious enough to click — NOT to summarise.
+
+Voice: first-person, wry, conversational British English — a maker sharing a \
+war story, not a marketer. No hashtags, no emoji, no "New blog post!", no \
+"check out". Don't reuse the article's opening paragraph or its excerpt \
+verbatim. One or two sentences, and it MUST be under 280 characters total. \
+Trailing ellipsis as a hook is welcome but optional.
+
+Example of the register (for a post about pinning a chatbot to one topic):
+"Given the fact that virtually every website now has an AI bot on it, you'd \
+think that the problem of keeping a chatbot on a single topic would have an \
+off-the-shelf solution, but there isn't one! No wonder so many of them are \
+easy to persuade to go astray..."
+
+Title: {title}
+
+Article:
+{body}
+
+Reply with ONLY the post text — no quotes, no preamble."""
+
+
 def compose_text(post: dict) -> str:
+    """An AI-written teaser in Martin's voice; title+excerpt as the fallback."""
+    try:
+        bedrock = boto3.client("bedrock-runtime", region_name=AWS_REGION)
+        resp = bedrock.converse(
+            modelId=BEDROCK_MODEL,
+            messages=[{
+                "role": "user",
+                "content": [{"text": TEASER_PROMPT.format(
+                    title=post["title"], body=post["body"][:6000],
+                )}],
+            }],
+            inferenceConfig={"maxTokens": 300, "temperature": 0.8},
+        )
+        text = resp["output"]["message"]["content"][0]["text"].strip().strip('"')
+        if 0 < len(text) <= MAX_POST_CHARS:
+            return text
+        print(f"warn: teaser length {len(text)} out of range, falling back", file=sys.stderr)
+    except Exception as err:  # noqa: BLE001 — a broken teaser must not block the announcement
+        print(f"warn: teaser generation failed ({err}), falling back", file=sys.stderr)
+
     text = post["title"]
     excerpt = post["excerpt"]
     if excerpt:
