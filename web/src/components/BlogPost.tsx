@@ -43,7 +43,10 @@ export default function BlogPost({ post }: BlogPostProps) {
     const diagrams = document.querySelectorAll<HTMLElement>('code.language-mermaid');
     if (diagrams.length === 0) return;
     import('mermaid').then(({ default: mermaid }) => {
-      mermaid.initialize({ startOnLoad: false, theme: 'default' });
+      // The blog renders on a dark ground; the 'default' theme's pale node
+      // fills leave the (inherited white) label text unreadable. 'dark' gives
+      // dark fills with light text that reads cleanly against the page.
+      mermaid.initialize({ startOnLoad: false, theme: 'dark' });
       diagrams.forEach(async (code, i) => {
         const source = code.textContent ?? '';
         const id = `mermaid-${Date.now()}-${i}`;
