@@ -86,27 +86,14 @@ jobs:
         with:
           submodules: false
 
-      # The runner container is minimal Ubuntu — make sure python3 + venv
-      # exist (persists in the container between jobs, so usually a no-op).
-      # Runs before anything that can fail so the alert step below always has
-      # a working boto3.
-      - name: Ensure Python
-        run: |
-          if ! command -v python3 >/dev/null || ! python3 -m venv --help >/dev/null 2>&1; then
-            apt-get update && apt-get install -y python3 python3-venv
-          fi
-
+      # python3/venv and the seeded github.com known_hosts are baked into the
+      # runner image by Luke's Ansible (home-infra) — the workflow must never
+      # install packages on that box. First so the failure alert below always
+      # has a working boto3.
       - name: Install sync dependencies
         run: |
           python3 -m venv .venv
           .venv/bin/pip install --quiet -r scripts/requirements.txt
-
-      # Unlike GitHub-hosted runners, the container has no pre-seeded SSH
-      # known_hosts — without this the submodule clone fails host verification.
-      - name: Trust github.com host keys
-        run: |
-          mkdir -p ~/.ssh
-          grep -q github.com ~/.ssh/known_hosts 2>/dev/null || ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
 
       - name: Load blog-content deploy key
         uses: webfactory/ssh-agent@v0.9.0
