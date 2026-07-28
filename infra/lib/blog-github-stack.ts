@@ -104,6 +104,7 @@ export class BlogGithubStack extends Stack {
       actions: ['ssm:GetParameter'],
       resources: [
         `arn:aws:ssm:${this.region}:${this.account}:parameter/blog/prod/substack/*`,
+        `arn:aws:ssm:${this.region}:${this.account}:parameter/blog/prod/bluesky/*`,
       ],
     }));
     deployRole.addToPolicy(new iam.PolicyStatement({
