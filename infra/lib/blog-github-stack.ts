@@ -91,6 +91,16 @@ export class BlogGithubStack extends Stack {
       resources: ['arn:aws:bedrock:us-east-1::foundation-model/amazon.titan-embed-text-v2:0'],
     }));
 
+    // Bluesky announcer (PIPE-20): teaser text via Claude Sonnet on Bedrock,
+    // same EU cross-region inference profile as the pipeline's redrafter.
+    deployRole.addToPolicy(new iam.PolicyStatement({
+      actions: ['bedrock:InvokeModel', 'bedrock:InvokeModelWithResponseStream'],
+      resources: [
+        'arn:aws:bedrock:*::foundation-model/*',
+        `arn:aws:bedrock:*:${this.account}:inference-profile/*`,
+      ],
+    }));
+
     // Allow the deploy role to read and write the DynamoDB table where blog chunks are stored
     const blogChunkTable = dynamodb.Table.fromTableName(this, 'BlogChunkTable', 'blog-chunks');
     blogChunkTable.grantReadWriteData(deployRole);
