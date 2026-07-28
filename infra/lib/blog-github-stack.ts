@@ -114,5 +114,15 @@ export class BlogGithubStack extends Stack {
       },
     }));
 
+    // Failure alerting (PIPE-15): the workflow's `if: failure()` step publishes
+    // to the pipeline-wide alerts topic, which lives in the blog-pipeline
+    // trigger stack (same account).
+    deployRole.addToPolicy(new iam.PolicyStatement({
+      actions: ['sns:Publish'],
+      resources: [
+        `arn:aws:sns:${this.region}:${this.account}:blog-pipeline-alerts-prod`,
+      ],
+    }));
+
   }
 }

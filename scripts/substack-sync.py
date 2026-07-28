@@ -176,6 +176,13 @@ def connect(cookie: str):
     try:
         return Api(cookies_string=cookie, publication_url=PUBLICATION_URL)
     except SubstackAPIException as err:
+        if "challenge" in str(err) or "Just a moment" in str(err):
+            sys.exit(
+                "error: Substack's Cloudflare bot challenge blocked this request. "
+                "The session cookie is probably fine — this happens from datacentre "
+                "IPs (e.g. GitHub-hosted runners) regardless of auth. Run the sync "
+                "from a residential IP (locally or a self-hosted runner)."
+            )
         sys.exit(
             f"error: Substack session rejected ({err}). The cookie in {SESSION_PARAM} "
             "has likely expired — copy a fresh substack.sid value from a logged-in "
