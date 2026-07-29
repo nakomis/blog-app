@@ -4,18 +4,23 @@
  * the publish pipeline. Uses Substack's signup embed (an iframe, so it works
  * without any first-party form handling) with a plain link as the fallback
  * for anyone blocking third-party frames.
+ *
+ * Two-column layout: pitch on the left, signup form on the right; stacks on
+ * narrow screens.
  */
 export default function SubscribeBox() {
   return (
     <aside className="subscribe-box" aria-label="Subscribe by email">
-      <h3>Get new posts by email</h3>
-      <p>
-        Every article lands in the{' '}
-        <a href="https://nakomis.substack.com" target="_blank" rel="noopener">
-          newsletter
-        </a>{' '}
-        the moment it's published — no algorithms, no noise.
-      </p>
+      <div className="subscribe-box__text">
+        <h3>Get new posts by email</h3>
+        <p>
+          Every article lands in the{' '}
+          <a href="https://nakomis.substack.com" target="_blank" rel="noopener">
+            newsletter
+          </a>{' '}
+          the moment it's published. Just the posts, nothing else.
+        </p>
+      </div>
       <iframe
         src="https://nakomis.substack.com/embed"
         title="Subscribe to the newsletter"
