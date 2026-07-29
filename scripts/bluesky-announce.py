@@ -12,8 +12,12 @@ Deliberately quiet by design:
   - Posts published before CUTOFF_DATE are never announced — the existing
     archive stays off the profile.
   - At most ONE announcement per run.
-  - Nothing is posted if the profile's latest Substack-linking post (manual or
-    automated — both count) is under MIN_GAP_DAYS old.
+  - Announcements follow publication: a post is announced on the run where it
+    goes live. The publication queue's own 3-day cadence provides the spacing;
+    MIN_GAP_HOURS is only a flood guard so a burst of same-day publishes
+    drains at one announcement per day instead of all at once.
+  - Nothing is posted if the profile's latest post-announcing entry (manual or
+    automated — both count) is under MIN_GAP_HOURS old.
   - Idempotent by URL: the profile's own feed is the record of what has been
     announced; anything linking a post's Substack URL suppresses it forever.
 
@@ -35,7 +39,11 @@ AWS_REGION = os.environ.get("AWS_REGION", "eu-west-2")
 SUBSTACK_URL = "https://nakomis.substack.com"
 
 CUTOFF_DATE = "2026-07-29"
-MIN_GAP_DAYS = 3
+# Flood guard only — NOT the announcement cadence. Publication dates drive
+# when posts are announced; this just stops a multi-post day flooding the
+# feed. Under 24h so the once-a-day scheduled run is never blocked by the
+# previous day's announcement.
+MIN_GAP_HOURS = 20
 MAX_POST_CHARS = 300
 
 FILE_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})-(.+)\.md$")
@@ -228,10 +236,10 @@ def main() -> None:
     announced, latest = announced_state(client, creds["handle"])
 
     now = datetime.datetime.now(datetime.timezone.utc)
-    if latest is not None and (now - latest) < datetime.timedelta(days=MIN_GAP_DAYS):
+    if latest is not None and (now - latest) < datetime.timedelta(hours=MIN_GAP_HOURS):
         print(
             f"Last announcement was {latest.isoformat()} — inside the "
-            f"{MIN_GAP_DAYS}-day gap, not posting."
+            f"{MIN_GAP_HOURS}-hour flood guard, not posting."
         )
         return
 
