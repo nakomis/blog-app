@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { BlogPost as BlogPostType } from '../types';
+import SubscribeBox from './SubscribeBox';
 
 interface BlogPostProps {
   post: BlogPostType;
@@ -110,6 +111,8 @@ export default function BlogPost({ post }: BlogPostProps) {
         dangerouslySetInnerHTML={{ __html: html }}
         onClick={handleContentClick}
       />
+
+      <SubscribeBox />
 
       <footer className="post-footer">
         <p>

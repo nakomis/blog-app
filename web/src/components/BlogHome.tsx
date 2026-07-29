@@ -1,5 +1,6 @@
 import { BlogPostListItem } from '../types';
 import BlogSearch from './BlogSearch';
+import SubscribeBox from './SubscribeBox';
 
 interface BlogHomeProps {
   posts: BlogPostListItem[];
@@ -42,6 +43,7 @@ export default function BlogHome({ posts }: BlogHomeProps) {
           </div>
         )}
       </section>
+      <SubscribeBox />
     </div>
   );
 }
