@@ -17,7 +17,9 @@ Deliberately quiet by design:
     MIN_GAP_HOURS is only a flood guard so a burst of same-day publishes
     drains at one announcement per day instead of all at once.
   - Nothing is posted if the profile's latest post-announcing entry (manual or
-    automated — both count) is under MIN_GAP_HOURS old.
+    automated — both count) is under MIN_GAP_HOURS old — unless the next
+    pending post is marked `bluesky_announce: force` in its frontmatter
+    (the bag's "Force Announce" option, PIPE-29), which bypasses the guard.
   - Idempotent by URL: the profile's own feed is the record of what has been
     announced; anything linking a post's Substack URL suppresses it forever.
 
@@ -79,9 +81,11 @@ def candidate_posts(content_dir: str) -> list[dict]:
             continue
         if publish_date < CUTOFF_DATE:
             continue
-        # Opt-out: unticking "announce on Bluesky" in the bag makes promote
-        # stamp this into the frontmatter (PIPE-20).
-        if str(fm.get("bluesky_announce", "true")).strip().lower() == "false":
+        # Announce mode from the bag's dropdown, stamped by promote
+        # (PIPE-20/PIPE-29): absent = announce, "false" = never announce,
+        # "force" = announce even inside the flood guard.
+        mode = str(fm.get("bluesky_announce", "")).strip().lower()
+        if mode == "false":
             continue
         with open(os.path.join(content_dir, name), encoding="utf-8") as fh:
             raw = fh.read()
@@ -93,6 +97,7 @@ def candidate_posts(content_dir: str) -> list[dict]:
             "body": body,
             "publish_date": publish_date,
             "url": f"{SUBSTACK_URL}/p/{name[:-3]}",
+            "forced": mode == "force",
         })
     posts.sort(key=lambda p: p["publish_date"])
     return posts
@@ -235,15 +240,22 @@ def main() -> None:
 
     announced, latest = announced_state(client, creds["handle"])
 
+    pending = [p for p in candidates if p["url"].rstrip("/") not in announced]
+    # Forced posts (PIPE-29) jump the queue and, below, the flood guard.
+    # Stable sort keeps oldest-first within each group.
+    pending.sort(key=lambda p: not p["forced"])
+
     now = datetime.datetime.now(datetime.timezone.utc)
-    if latest is not None and (now - latest) < datetime.timedelta(hours=MIN_GAP_HOURS):
+    guarded = latest is not None and (now - latest) < datetime.timedelta(
+        hours=MIN_GAP_HOURS
+    )
+    if guarded and not (pending and pending[0]["forced"]):
         print(
             f"Last announcement was {latest.isoformat()} — inside the "
             f"{MIN_GAP_HOURS}-hour flood guard, not posting."
         )
         return
 
-    pending = [p for p in candidates if p["url"].rstrip("/") not in announced]
     if not pending:
         print("Every eligible post is already announced.")
         return
