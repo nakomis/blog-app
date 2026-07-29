@@ -113,14 +113,18 @@ def announced_state(client, handle: str) -> tuple[set[str], datetime.datetime | 
             post = item.post
             if post.author.handle != handle:
                 continue  # repost of someone else
+            # Only links to an actual post (/p/...) count as announcements.
+            # A card linking the publication root — e.g. the pinned intro
+            # post — must not restart the 3-day gap clock.
+            post_link = f"{SUBSTACK_URL}/p/"
             found = set()
             embed = getattr(post.record, "embed", None)
             external = getattr(embed, "external", None)
             uri = getattr(external, "uri", "") or ""
-            if SUBSTACK_URL in uri:
+            if post_link in uri:
                 found.add(uri.split("?")[0].rstrip("/"))
             for m in re.finditer(r"https?://\S+", getattr(post.record, "text", "") or ""):
-                if SUBSTACK_URL in m.group(0):
+                if post_link in m.group(0):
                     found.add(m.group(0).split("?")[0].rstrip("/"))
             if found:
                 urls |= found
