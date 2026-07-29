@@ -638,6 +638,33 @@ a:hover {
   border-radius: 0 8px 8px 0;
 }
 
+/* Subscribe box (PIPE-21) — email capture via the Substack embed */
+.subscribe-box {
+  margin: 2.5rem 0;
+  padding: 1.25rem 1.5rem;
+  background-color: rgba(25, 118, 210, 0.05);
+  border: 1px solid #1976d2;
+  border-radius: 8px;
+}
+
+.subscribe-box h3 {
+  margin: 0 0 0.5rem;
+}
+
+.subscribe-box p {
+  margin: 0 0 0.75rem;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.subscribe-box iframe {
+  width: 100%;
+  max-width: 480px;
+  height: 120px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+}
+
 /* Footer styles — fixed to viewport bottom */
 .blog-footer {
   position: fixed;
