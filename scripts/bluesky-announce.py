@@ -156,7 +156,11 @@ def og_image(url: str) -> bytes | None:
     """The post's social-card image, for the link-card thumbnail."""
     try:
         page = requests.get(url, timeout=30)
-        m = re.search(r'<meta property="og:image" content="([^"]+)"', page.text)
+        # Substack renders `<meta data-rh="true" property="og:image" …>` — the
+        # tag can carry attributes before `property`, so match anywhere in it.
+        m = re.search(
+            r'<meta[^>]*property="og:image"[^>]*content="([^"]+)"', page.text
+        )
         if not m:
             return None
         img = requests.get(m.group(1), timeout=30)
