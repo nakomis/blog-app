@@ -9,6 +9,7 @@ interface BlogHomeProps {
 export default function BlogHome({ posts }: BlogHomeProps) {
   return (
     <div className="blog-home">
+      <SubscribeBox />
       <BlogSearch />
       <section className="posts">
         <h2>Latest Articles</h2>
@@ -43,7 +44,6 @@ export default function BlogHome({ posts }: BlogHomeProps) {
           </div>
         )}
       </section>
-      <SubscribeBox />
     </div>
   );
 }
