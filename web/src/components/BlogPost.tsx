@@ -76,8 +76,39 @@ export default function BlogPost({ post }: BlogPostProps) {
     };
   }, [frontmatter]);
 
+  // A post opened at /slug#some-heading must still land on the heading. The
+  // browser's own hash scroll fires before this SPA has painted the content, so
+  // nothing is there to scroll to; do it ourselves once the HTML is in the DOM.
+  useEffect(() => {
+    const id = decodeURIComponent(window.location.hash.slice(1));
+    if (!id) return;
+    const target = document.getElementById(id);
+    if (target) requestAnimationFrame(() => target.scrollIntoView({ behavior: 'smooth' }));
+  }, [html]);
+
   function handleContentClick(e: React.MouseEvent<HTMLDivElement>) {
     const target = e.target as HTMLElement;
+
+    // Clicking a heading anchor copies its permalink rather than navigating, so
+    // the URL can be pasted elsewhere. Falls through to normal navigation if
+    // the clipboard is unavailable (insecure context, or permission refused).
+    const anchor = target.closest<HTMLAnchorElement>('a.heading-anchor');
+    if (anchor) {
+      const url = new URL(anchor.getAttribute('href') ?? '', window.location.href).href;
+      if (navigator.clipboard?.writeText) {
+        e.preventDefault();
+        navigator.clipboard.writeText(url).then(
+          () => {
+            history.replaceState(null, '', anchor.getAttribute('href'));
+            anchor.classList.add('copied');
+            window.setTimeout(() => anchor.classList.remove('copied'), 1500);
+          },
+          () => { window.location.hash = anchor.getAttribute('href') ?? ''; },
+        );
+      }
+      return;
+    }
+
     if (target.tagName === 'IMG') {
       setLightboxSrc((target as HTMLImageElement).src);
     }

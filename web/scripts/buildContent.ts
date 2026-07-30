@@ -1,27 +1,13 @@
 import fs from 'fs';
 import path from 'path';
-import { unified } from 'unified';
-import remarkParse from 'remark-parse';
-import remarkFrontmatter from 'remark-frontmatter';
-import remarkGfm from 'remark-gfm';
-import remarkRehype from 'remark-rehype';
-import rehypeRaw from 'rehype-raw';
-import rehypeHighlight from 'rehype-highlight';
-import rehypeStringify from 'rehype-stringify';
 import matter from 'gray-matter';
 import { applyShortcodes } from '../src/shortcodes.js';
+import { createMarkdownProcessor } from '../src/utils/markdownPipeline.js';
 
 async function processMarkdownContent(markdownContent: string, slug: string) {
   const { data: frontmatter, content } = matter(markdownContent);
 
-  const processor = unified()
-    .use(remarkParse)
-    .use(remarkFrontmatter)
-    .use(remarkGfm)
-    .use(remarkRehype, { allowDangerousHtml: true })
-    .use(rehypeRaw)
-    .use(rehypeHighlight)
-    .use(rehypeStringify);
+  const processor = createMarkdownProcessor();
 
   const result = await processor.process(applyShortcodes(content, frontmatter as Parameters<typeof applyShortcodes>[1], slug));
 
