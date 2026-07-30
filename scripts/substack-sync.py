@@ -63,13 +63,17 @@ LEADING_H1_RE = re.compile(r"^\s*#\s+.+\n+", flags=0)
 
 # The blog gives every heading an id (rehype-slug) so posts can link to their own
 # sections. Substack does not: measured 2026-07-30 against a mirrored post,
-# 0 of 25 headings carried an id, and raw HTML is stripped too — the {{donate}}
-# <form> does not survive, so a hand-written <a id="..."></a> would not either.
-# An in-document link therefore cannot resolve on the mirror by any route, so
-# unwrap it to its text rather than shipping a link that goes nowhere. Inline
-# references ("see [the carving section](#carve)") stay readable; a standalone
-# "TL;DR jump to..." line will read a little oddly, so prefer not to use one in
-# a post destined for the mirror. See BAPP-7.
+# 0 of 25 headings carried an id. So an in-document link has nothing to target
+# there, and we unwrap it to its text rather than shipping a link that goes
+# nowhere. Inline references ("see [the carving section](#carve)") stay
+# readable; a standalone "TL;DR jump to..." line reads a little oddly, so prefer
+# not to use one in a post destined for the mirror.
+#
+# Bare <a id="..."></a> anchors are dropped for the same reason — they only
+# exist to be jumped to. Note this is NOT evidence that Substack strips raw
+# HTML: we have never tested that, because the only raw HTML our posts contain
+# is the {{donate}} form, and PLACEHOLDER_RE removes that above before upload.
+# See BAPP-7.
 INDOC_LINK_RE = re.compile(r"\[([^\]]+)\]\(#[^)]*\)")
 BARE_ANCHOR_RE = re.compile(r'<a\s+id="[^"]*"\s*>\s*</a>\s*\n?', re.I)
 
