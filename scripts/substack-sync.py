@@ -61,6 +61,18 @@ FILE_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})-(.+)\.md$")
 PLACEHOLDER_RE = re.compile(r"^\s*\{\{(donate|image\b[^}]*)\}\}\s*$", re.M)
 LEADING_H1_RE = re.compile(r"^\s*#\s+.+\n+", flags=0)
 
+# The blog gives every heading an id (rehype-slug) so posts can link to their own
+# sections. Substack does not: measured 2026-07-30 against a mirrored post,
+# 0 of 25 headings carried an id, and raw HTML is stripped too — the {{donate}}
+# <form> does not survive, so a hand-written <a id="..."></a> would not either.
+# An in-document link therefore cannot resolve on the mirror by any route, so
+# unwrap it to its text rather than shipping a link that goes nowhere. Inline
+# references ("see [the carving section](#carve)") stay readable; a standalone
+# "TL;DR jump to..." line will read a little oddly, so prefer not to use one in
+# a post destined for the mirror. See BAPP-7.
+INDOC_LINK_RE = re.compile(r"\[([^\]]+)\]\(#[^)]*\)")
+BARE_ANCHOR_RE = re.compile(r'<a\s+id="[^"]*"\s*>\s*</a>\s*\n?', re.I)
+
 
 def parse_frontmatter(text: str) -> tuple[dict, str]:
     """Return ({key: value}, body) from simple `key: "value"` frontmatter."""
@@ -150,9 +162,12 @@ def subtitle_for(excerpt: str, limit: int = 140) -> str:
 
 
 def prepare_markdown(post: dict) -> str:
-    """Strip placeholders and the leading H1 (Substack renders its own title)."""
+    """Strip placeholders, the leading H1 (Substack renders its own title), and
+    in-document anchor links (Substack emits no heading ids — see BAPP-7)."""
     md = PLACEHOLDER_RE.sub("", post["body"])
     md = LEADING_H1_RE.sub("", md, count=1)
+    md = BARE_ANCHOR_RE.sub("", md)
+    md = INDOC_LINK_RE.sub(r"\1", md)
     return md.strip() + "\n"
 
 
