@@ -24,9 +24,17 @@ This rewrites live, published content. Accordingly:
   * post_date is read back and passed through, so republishing cannot silently
     re-date a backfilled post to today
 
-Usage:
-    python scripts/substack-backfill-code-langs.py --content-dir web/content/blog
-    python scripts/substack-backfill-code-langs.py --content-dir web/content/blog \
+Needs the venv — python-substack is not in the system Python:
+
+    python3 -m venv .venv && .venv/bin/pip install -r scripts/requirements.txt
+
+Usage (residential IP required; Substack's Cloudflare challenges datacentre
+addresses, so run this from a Mac rather than CI):
+
+    .venv/bin/python scripts/substack-backfill-code-langs.py \
+        --content-dir web/content/blog
+    .venv/bin/python scripts/substack-backfill-code-langs.py \
+        --content-dir web/content/blog \
         --slug 2026-06-03-why-i-switched-to-pnpm --apply
 """
 import argparse
