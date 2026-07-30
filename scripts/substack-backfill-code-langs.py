@@ -7,14 +7,17 @@ before that fix carry the legacy `codeBlock` node — a bare <pre><code> with no
 highlighting — and will never fix themselves. This script rewrites them in
 place.
 
-THE CATCH: a legacy `codeBlock` has no language. That was the bug — the
-language never reached Substack, so it cannot be read back out of the post.
-It has to be recovered from the source markdown in blog-content, by matching
-the Nth code block in the post to the Nth fence in the post's markdown.
+The languages are already there. Inspecting stored bodies showed that the
+legacy nodes retain `attrs.language` perfectly well ("nginx", "python", "yaml"
+…) — the language always did reach Substack. The bug was only ever the node
+type, so this is a retype, not a reconstruction, and the stored language is
+authoritative.
 
-That positional match is only safe if the counts agree exactly, so a post whose
-block count differs from its fence count is SKIPPED rather than guessed at. In
-practice a mismatch means the post was hand-edited on Substack after mirroring.
+The source markdown is used only as a fallback, for blocks that never had a
+language because their fence carried no info string — and only when every code
+node in the post lines up with a fence. A post part-converted by hand does not
+line up, so it falls back to Substack's default rather than being matched
+positionally against the wrong fences.
 
 This rewrites live, published content. Accordingly:
 
@@ -74,21 +77,32 @@ def fence_languages(md: str) -> list[str]:
     return langs
 
 
-def walk_code_blocks(nodes):
-    """Yield every legacy codeBlock node, depth-first, in document order.
+# Substack stores three code node types and highlights exactly one of them:
+#
+#   codeBlock              what python-substack POSTs           not highlighted
+#   code_block             the editor's normalisation on save   not highlighted
+#   highlighted_code_block Shiki                                highlighted
+#
+# Both legacy forms retain attrs.language perfectly well — the language always
+# did reach Substack. The bug is only ever the node type.
+LEGACY_CODE_TYPES = ("codeBlock", "code_block")
+CODE_TYPES = LEGACY_CODE_TYPES + ("highlighted_code_block",)
+
+
+def walk_code_blocks(nodes, types=LEGACY_CODE_TYPES):
+    """Yield code nodes of the given types, depth-first, in document order.
 
     Code blocks nest inside lists and blockquotes, so a flat scan of the top
-    level would miss some and throw the positional match out of step.
+    level would miss some and throw the positional fallback out of step.
     """
     for node in nodes:
         if not isinstance(node, dict):
             continue
-        if node.get("type") == "codeBlock":
+        if node.get("type") in types:
             yield node
-        for key in ("content",):
-            child = node.get(key)
-            if isinstance(child, list):
-                yield from walk_code_blocks(child)
+        child = node.get("content")
+        if isinstance(child, list):
+            yield from walk_code_blocks(child, types)
 
 
 def node_text(node: dict) -> str:
@@ -105,12 +119,21 @@ def convert(node: dict, language: str) -> None:
     attrs.setdefault("nodeId", str(uuid.uuid4()))
 
 
-def markdown_by_slug(content_dir: str) -> dict:
-    """slug -> prepared markdown, matching exactly what was mirrored."""
-    out = {}
+def markdown_index(content_dir: str) -> tuple[dict, dict]:
+    """(by slug, by normalised title) -> prepared markdown as mirrored.
+
+    Substack does not always keep our slug: the certificate post is filed here
+    as 2026-02-26-the-certificate-that-had-to-live-in-america but mirrored as
+    the-certificate-that-had-to-live. The sync script hits the same problem
+    when deciding what is already published and falls back to comparing
+    normalised titles, so do the same rather than skipping the post.
+    """
+    by_slug, by_title = {}, {}
     for post in sync.live_posts(content_dir):
-        out[post["slug"]] = sync.prepare_markdown(post)
-    return out
+        md = sync.prepare_markdown(post)
+        by_slug[post["slug"]] = md
+        by_title[sync.norm_title(post["title"])] = md
+    return by_slug, by_title
 
 
 def backfill(api, post_meta: dict, md: str, apply: bool) -> str:
@@ -122,23 +145,34 @@ def backfill(api, post_meta: dict, md: str, apply: bool) -> str:
 
     content = body.get("content", body if isinstance(body, list) else [])
     blocks = list(walk_code_blocks(content))
-    langs = fence_languages(md)
 
     if not blocks:
         already = body_raw.count('"highlighted_code_block"')
         return f"skip  {slug}: no legacy code blocks" + (
             f" ({already} already converted)" if already else ""
         )
-    if len(blocks) != len(langs):
-        return (
-            f"SKIP  {slug}: {len(blocks)} code blocks but {len(langs)} fences in "
-            "markdown — refusing to guess (hand-edited on Substack?)"
-        )
 
-    for node, lang in zip(blocks, langs):
-        convert(node, lang)
+    # The stored attrs.language is authoritative. The markdown is only a
+    # fallback for blocks that never had one (a fence with no info string),
+    # and only when every code node in the post lines up with a fence — a post
+    # part-converted by hand does not, and must not be matched positionally.
+    all_code = list(walk_code_blocks(content, CODE_TYPES))
+    fences = fence_languages(md)
+    aligned = len(all_code) == len(fences)
+    fallback = dict(zip((id(n) for n in all_code), fences)) if aligned else {}
 
-    summary = ", ".join(sorted({l for l in langs}))
+    applied, guessed = [], 0
+    for node in blocks:
+        stored = (node.get("attrs") or {}).get("language")
+        lang = stored or fallback.get(id(node))
+        if not stored:
+            guessed += 1
+        convert(node, lang or sync.DEFAULT_CODE_LANG)
+        applied.append(lang or sync.DEFAULT_CODE_LANG)
+
+    summary = ", ".join(sorted(set(applied)))
+    if guessed:
+        summary += f"; {guessed} from " + ("markdown" if aligned else "default")
     if not apply:
         return f"WOULD  {slug}: convert {len(blocks)} blocks ({summary})"
 
@@ -161,7 +195,7 @@ def main() -> None:
     args = parser.parse_args()
 
     api = sync.connect(sync.load_session_cookie())
-    md_by_slug = markdown_by_slug(args.content_dir)
+    md_by_slug, md_by_title = markdown_index(args.content_dir)
 
     published, offset, limit = [], 0, 25
     while True:
@@ -180,7 +214,9 @@ def main() -> None:
         slug = meta.get("slug", "")
         if args.slug and slug != args.slug:
             continue
-        md = md_by_slug.get(slug)
+        md = md_by_slug.get(slug) or md_by_title.get(
+            sync.norm_title(meta.get("title", ""))
+        )
         if md is None:
             print(f"skip  {slug}: no matching markdown in content dir")
             continue
