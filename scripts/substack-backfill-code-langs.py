@@ -45,9 +45,15 @@ import importlib.util
 import json
 import os
 import sys
+import time
 import uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+
+# Substack rate-limits a sustained backfill: a full run of ~20 posts, each
+# costing a PUT and a POST, starts 429ing around the sixteenth.
+RETRY_BASE_DELAY = 5
+PER_POST_DELAY = 2
 
 # substack-sync.py is not importable by name (hyphen), and it is the single
 # source of truth for the session cookie, the API connection and the markdown
@@ -119,6 +125,24 @@ def convert(node: dict, language: str) -> None:
     attrs.setdefault("nodeId", str(uuid.uuid4()))
 
 
+def with_retry(fn, *a, attempts: int = 5, **kw):
+    """Call fn, backing off on Substack's 429.
+
+    Each post costs a PUT and a POST, and a full backfill run trips the rate
+    limiter around the sixteenth post. Substack sends no Retry-After (the body
+    is not even JSON), so this backs off exponentially: 5s, 10s, 20s, 40s.
+    """
+    for attempt in range(attempts):
+        try:
+            return fn(*a, **kw)
+        except Exception as err:  # noqa: BLE001 — the library wraps all of it
+            if "429" not in str(err) or attempt == attempts - 1:
+                raise
+            wait = RETRY_BASE_DELAY * (2 ** attempt)
+            print(f"      rate limited, waiting {wait}s…", flush=True)
+            time.sleep(wait)
+
+
 def markdown_index(content_dir: str) -> tuple[dict, dict]:
     """(by slug, by normalised title) -> prepared markdown as mirrored.
 
@@ -139,7 +163,7 @@ def markdown_index(content_dir: str) -> tuple[dict, dict]:
 def backfill(api, post_meta: dict, md: str, apply: bool) -> str:
     """Returns a one-line status for this post."""
     slug = post_meta["slug"]
-    draft = api.get_draft(post_meta["id"])
+    draft = with_retry(api.get_draft, post_meta["id"])
     body_raw = draft.get("draft_body") or "{}"
     body = json.loads(body_raw) if isinstance(body_raw, str) else body_raw
 
@@ -180,8 +204,9 @@ def backfill(api, post_meta: dict, md: str, apply: bool) -> str:
     # Republishing without this can re-date the post to now.
     if draft.get("post_date"):
         kwargs["post_date"] = draft["post_date"]
-    api.put_draft(post_meta["id"], **kwargs)
-    api.publish_draft(post_meta["id"], send=False, share_automatically=False)
+    with_retry(api.put_draft, post_meta["id"], **kwargs)
+    with_retry(api.publish_draft, post_meta["id"], send=False,
+               share_automatically=False)
     return f"done  {slug}: converted {len(blocks)} blocks ({summary})"
 
 
@@ -192,6 +217,9 @@ def main() -> None:
     parser.add_argument("--slug", help="backfill a single post (do this first)")
     parser.add_argument("--apply", action="store_true",
                         help="actually write; without it, dry run")
+    parser.add_argument("--delay", type=float, default=PER_POST_DELAY,
+                        help=f"seconds between posts (default {PER_POST_DELAY}) — "
+                             "Substack 429s a sustained run")
     args = parser.parse_args()
 
     api = sync.connect(sync.load_session_cookie())
@@ -224,8 +252,10 @@ def main() -> None:
             line = backfill(api, meta, md, args.apply)
         except Exception as err:  # noqa: BLE001 — report and carry on
             line = f"ERROR {slug}: {err}"
-        print(line)
+        print(line, flush=True)
         changed += line.startswith(("done", "WOULD"))
+        if args.apply and line.startswith("done"):
+            time.sleep(args.delay)
 
     if args.slug and changed == 0:
         sys.exit(f"error: no published post matched --slug {args.slug}")
