@@ -34,19 +34,31 @@ jobs:
           role-to-assume: arn:aws:iam::637423226886:role/blog-app-github-deploy
           aws-region: eu-west-2
 
+      # pnpm (version pinned via web/package.json "packageManager"). Must precede
+      # setup-node so its cache can key off the pnpm store.
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: npm
-          cache-dependency-path: web/package-lock.json
+          node-version: '22'
+          cache: 'pnpm'
+          cache-dependency-path: web/pnpm-lock.yaml
 
+      # No ~/.npmrc on the runner, so pnpm resolves from npmjs. The lockfile is
+      # registry-agnostic (integrity hashes only, no hostnames), so this is the
+      # same dependency tree a developer gets resolving through the home Nexus
+      # proxy. npm could not do this: it bakes the resolved host into
+      # package-lock.json, so a lockfile built at home 401s here.
       - name: Install dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
         working-directory: web
 
       - name: Build
-        run: npm run build
+        run: pnpm run build
         working-directory: web
 
       - name: Deploy

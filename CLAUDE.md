@@ -48,7 +48,7 @@ git add web/content
 git commit -m "chore: update blog-content submodule"
 
 # 2. Build
-cd web && npm run build
+cd web && pnpm run build
 
 # 3. Deploy to S3 and invalidate CloudFront
 bash web/scripts/deploy.sh
@@ -60,8 +60,8 @@ bash web/scripts/deploy.sh
 
 ```bash
 cd web
-npm install
-npm run dev    # http://localhost:5173
+pnpm install
+pnpm run dev   # http://localhost:5173
 ```
 
 ## Semantic search / RAG pipeline

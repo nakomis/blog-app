@@ -107,15 +107,15 @@ At runtime, the app also fetches raw markdown files from S3 (`/posts/<slug>.md`)
 
 ```bash
 cd web
-npm install
-npm run dev        # local dev server on http://localhost:5173
+pnpm install
+pnpm run dev       # local dev server on http://localhost:5173
 ```
 
 ### Deployment
 
 ```bash
 cd web
-npm run build                    # build to web/dist/
+pnpm run build                   # build to web/dist/
 bash scripts/deploy.sh           # sync dist/ and content/blog/ to S3, invalidate CloudFront
 ```
 
@@ -133,7 +133,7 @@ Three CDK stacks — deploy in order:
 
 ```bash
 cd infra
-npm install
+pnpm install
 cdk deploy BlogCertStack --profile nakom.is-admin   # us-east-1 cert (first time only)
 cdk deploy BlogStack --profile nakom.is-admin       # eu-west-2 S3/CloudFront/Route53
 cdk deploy BlogGithubStack --profile nakom.is-admin # GitHub OIDC + deploy role (one-time setup)
