@@ -826,3 +826,82 @@ a:hover {
     padding: 2rem;
   }
 }
+/* --- Heading anchors ---------------------------------------------------- */
+/* rehype-autolink-headings appends <a class="heading-anchor"># </a> to every
+   heading. It stays invisible until the heading is hovered (or the link is
+   keyboard-focused) so it never competes with the heading text. Clicking it
+   copies the permalink instead of navigating — see handleContentClick in
+   BlogPost.tsx. */
+
+.post-content h1,
+.post-content h2,
+.post-content h3,
+.post-content h4,
+.post-content h5,
+.post-content h6 {
+  position: relative;
+  /* Keep an anchored heading clear of anything fixed at the top of the page
+     when arriving via a #hash link. */
+  scroll-margin-top: 5rem;
+}
+
+.post-content .heading-anchor {
+  margin-left: 0.45rem;
+  color: #1976d2;
+  text-decoration: none;
+  font-weight: 400;
+  opacity: 0;
+  transition: opacity 0.15s ease-in-out;
+}
+
+.post-content h1:hover .heading-anchor,
+.post-content h2:hover .heading-anchor,
+.post-content h3:hover .heading-anchor,
+.post-content h4:hover .heading-anchor,
+.post-content h5:hover .heading-anchor,
+.post-content h6:hover .heading-anchor,
+.post-content .heading-anchor:focus-visible {
+  opacity: 0.55;
+}
+
+.post-content .heading-anchor:hover {
+  opacity: 1;
+}
+
+.post-content .heading-anchor:focus-visible {
+  opacity: 1;
+  outline: 2px solid #1976d2;
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+/* Touch devices have no hover, so a permanently-hidden anchor would be
+   unreachable. Show it faintly instead. */
+@media (hover: none) {
+  .post-content .heading-anchor {
+    opacity: 0.35;
+  }
+}
+
+/* Confirmation that the URL reached the clipboard. */
+.post-content .heading-anchor.copied {
+  opacity: 1;
+}
+
+.post-content .heading-anchor.copied::after {
+  content: 'Copied';
+  margin-left: 0.4rem;
+  padding: 0.1rem 0.4rem;
+  font-size: 0.7rem;
+  font-family: 'Roboto', sans-serif;
+  vertical-align: middle;
+  color: #fff;
+  background: #1976d2;
+  border-radius: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .post-content .heading-anchor {
+    transition: none;
+  }
+}
