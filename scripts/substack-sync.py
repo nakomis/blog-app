@@ -36,9 +36,11 @@ import os
 import re
 import sys
 import time
+import uuid
 
 import boto3
 import requests
+from substack import nodes as substack_nodes
 
 PUBLICATION_URL = os.environ.get("SUBSTACK_PUBLICATION_URL", "https://nakomis.substack.com")
 SESSION_PARAM = os.environ.get("SUBSTACK_SESSION_PARAM", "/blog/prod/substack/session")
@@ -98,6 +100,144 @@ DONATE_MD = (
     "(https://www.paypalobjects.com/en_GB/i/btn/btn_donate_SM.gif)]"
     "(https://www.paypal.com/donate/?hosted_button_id=Q3BESC73EWVNN)"
 )
+
+
+# --- Substack renderer limitations (BAPP-8) -------------------------------
+#
+# Two things the blog does that Substack cannot, worked around by rewriting the
+# markdown before it ever reaches python-substack. Both were verified against
+# the live mirror on 2026-07-30 rather than assumed:
+#
+# 1. TABLES. python-substack builds its parser with MarkdownIt("commonmark")
+#    and never enables the table rule, so table lines are never tokenised as a
+#    table — they fall through to the paragraph renderer and arrive as one run
+#    of literal pipe text with the row breaks gone. This is not a preset we can
+#    flip: nodes.py has no table node type at all, so the library has no way to
+#    express one. We flatten tables to bullets instead, which loses the grid but
+#    keeps every cell and its column label.
+#
+# 2. CODE BLOCK LANGUAGES. Substack has two code node types, and
+#    python-substack emits the wrong one. `codeBlock` is the legacy plain
+#    block: it renders a bare <pre><code> with no highlighting and no language
+#    class, which is what every mirrored post got. The editor's own blocks are
+#    `highlighted_code_block`, carrying attrs {language, nodeId} and rendering
+#    via Shiki as:
+#        <div class="highlighted_code_block"
+#             data-attrs='{"language":"bash","nodeId":"3a4c..."}'
+#             data-component-name="HighlightedCodeBlockToDOM">
+#          <pre class="shiki"><code class="language-bash">
+#    Proven by re-saving one block through Substack's editor and diffing the
+#    delivered HTML against an untouched post: the re-saved block gained the
+#    node type, the language class and the highlighting; untouched posts carry
+#    no code language in their body JSON at all. So the language was never
+#    reaching Substack, and this is fixable on our side — see
+#    _highlighted_code_block below.
+FENCE_RE = re.compile(r"^(\s*)(`{3,}|~{3,})\s*(\S*)")
+TABLE_DELIM_RE = re.compile(r"^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)+\|?\s*$")
+
+# Substack's default when a fence carries no info string.
+DEFAULT_CODE_LANG = "text"
+
+
+def _highlighted_code_block(code: str, language: str = None) -> dict:
+    """Build the node type Substack actually highlights.
+
+    Replaces substack.nodes.code_block, which mdrender looks up on the module
+    at call time, so patching the attribute is enough to redirect every fence
+    the markdown renderer produces.
+    """
+    return {
+        "type": "highlighted_code_block",
+        "content": [substack_nodes.text(code)],
+        "attrs": {
+            "language": (language or DEFAULT_CODE_LANG).strip().lower(),
+            # The editor assigns each block a UUID; drafts are created once per
+            # post, so a fresh one per block is correct.
+            "nodeId": str(uuid.uuid4()),
+        },
+    }
+
+
+substack_nodes.code_block = _highlighted_code_block
+
+
+def _split_row(line: str) -> list[str]:
+    """Cells of a markdown table row, honouring \\| escapes inside cells."""
+    line = line.strip()
+    if line.startswith("|"):
+        line = line[1:]
+    if line.endswith("|") and not line.endswith("\\|"):
+        line = line[:-1]
+    cells, buf, i = [], "", 0
+    while i < len(line):
+        if line[i] == "\\" and i + 1 < len(line) and line[i + 1] == "|":
+            buf += "|"      # an escaped pipe is content, not a separator
+            i += 2
+            continue
+        if line[i] == "|":
+            cells.append(buf.strip())
+            buf = ""
+        else:
+            buf += line[i]
+        i += 1
+    cells.append(buf.strip())
+    return cells
+
+
+def _table_to_bullets(header: list[str], rows: list[list[str]]) -> list[str]:
+    """Render a table as one bullet per row, first cell as the row's label.
+
+    Two-column tables are the common term/definition case and read better
+    without repeating the second column's header on every line.
+    """
+    out = []
+    for row in rows:
+        row = row + [""] * (len(header) - len(row))    # tolerate short rows
+        label = row[0] or "—"
+        rest = [
+            (f"{header[i]}: {row[i]}" if len(header) > 2 else row[i])
+            for i in range(1, len(header))
+            if row[i]
+        ]
+        out.append(f"- **{label}**" + (f" — {'; '.join(rest)}" if rest else ""))
+    return out
+
+
+def rewrite_for_substack(md: str) -> str:
+    """Flatten tables, leaving fenced content alone.
+
+    Fence tracking matters because a pipe-delimited line inside a shell snippet
+    must not be mistaken for a table row. Code blocks themselves need no
+    markdown rewriting — they are fixed at the node level, see
+    _highlighted_code_block.
+    """
+    lines = md.split("\n")
+    out: list[str] = []
+    fence: str | None = None
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        m = FENCE_RE.match(line)
+        if m and (fence is None or line.strip().startswith(fence)):
+            fence = m.group(2) if fence is None else None
+            out.append(line)
+            i += 1
+            continue
+
+        if fence is None and line.lstrip().startswith("|") \
+                and i + 1 < len(lines) and TABLE_DELIM_RE.match(lines[i + 1]):
+            header = _split_row(line)
+            i += 2
+            rows = []
+            while i < len(lines) and lines[i].lstrip().startswith("|"):
+                rows.append(_split_row(lines[i]))
+                i += 1
+            out.extend(_table_to_bullets(header, rows))
+            continue
+
+        out.append(line)
+        i += 1
+    return "\n".join(out)
 
 
 def parse_frontmatter(text: str) -> tuple[dict, str]:
@@ -194,12 +334,18 @@ def prepare_markdown(post: dict) -> str:
     title), substitutes {{donate}} for a PayPal link, drops hand-written
     anchors, and prefixes in-document links with the section sign Substack
     expects. See BAPP-7.
+
+    Finally flattens tables and captions code blocks, neither of which Substack
+    can render as the blog does. See BAPP-8 and rewrite_for_substack.
     """
     md = PLACEHOLDER_RE.sub("", post["body"])
     md = DONATE_PLACEHOLDER_RE.sub(DONATE_MD, md)
     md = LEADING_H1_RE.sub("", md, count=1)
     md = BARE_ANCHOR_RE.sub("", md)
     md = INDOC_LINK_RE.sub(r"\1#" + SECTION_SIGN + r"\2)", md)
+    # Last: it is fence-aware, so it must run after the substitutions above
+    # rather than race them for the same lines.
+    md = rewrite_for_substack(md)
     return md.strip() + "\n"
 
 
@@ -246,15 +392,36 @@ def draft_has_local_images(draft: dict) -> bool:
     return bool(re.search(r'"src":\s*"(?!https://)', body))
 
 
+def count_fences(md: str) -> int:
+    """Number of fenced code blocks in the prepared markdown."""
+    fence, n = None, 0
+    for line in md.split("\n"):
+        m = FENCE_RE.match(line)
+        if m and (fence is None or line.strip().startswith(fence)):
+            if fence is None:
+                fence, n = m.group(2), n + 1
+            else:
+                fence = None
+    return n
+
+
+def draft_code_block_count(draft: dict) -> int:
+    body = draft.get("draft_body", "")
+    if isinstance(body, dict):
+        body = json.dumps(body)
+    return body.count('"highlighted_code_block"')
+
+
 def publish_post(api, post: dict, send: bool, dry_run: bool) -> None:
     action = "email" if send else "web-only"
     if dry_run:
         print(f"DRY RUN: would publish {post['slug']} ({action})")
         return
 
+    markdown = prepare_markdown(post)
     result = api.create_draft_from_markdown(
         title=post["title"],
-        markdown=prepare_markdown(post),
+        markdown=markdown,
         subtitle=subtitle_for(post["excerpt"]),
         slug=post["slug"],
         search_engine_description=post["excerpt"][:300] or None,
@@ -266,6 +433,18 @@ def publish_post(api, post: dict, send: bool, dry_run: bool) -> None:
     if draft_has_local_images(draft):
         api.delete_draft(draft_id)
         sys.exit(f"error: {post['slug']} draft contains un-uploaded image paths; aborting")
+
+    # highlighted_code_block is Substack's own node type, but it is not a
+    # documented API contract — if they ever stop accepting it, the nodes could
+    # be dropped and the post would publish with its code silently missing.
+    # Fail loudly instead, leaving nothing published.
+    expected, got = count_fences(markdown), draft_code_block_count(draft)
+    if expected and got < expected:
+        api.delete_draft(draft_id)
+        sys.exit(
+            f"error: {post['slug']} draft kept {got}/{expected} code blocks — "
+            "Substack may have stopped accepting highlighted_code_block; aborting"
+        )
 
     api.prepublish_draft(draft_id)
     api.publish_draft(draft_id, send=send, share_automatically=False)
