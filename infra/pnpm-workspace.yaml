@@ -1,0 +1,9 @@
+# pnpm settings for the infra package. Not a real workspace (single package) —
+# this file exists only to hold pnpm's supply-chain settings, matching web/.
+
+# minimumReleaseAge: refuse to resolve a version published less than this many
+# minutes ago — a defence against installing a package in the window just after
+# it has been compromised and republished. 1440 = 24h.
+# CI installs with --frozen-lockfile, so this only affects local dependency
+# updates, never reproducible installs.
+minimumReleaseAge: 1440

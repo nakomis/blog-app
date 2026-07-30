@@ -2,6 +2,7 @@
   "name": "blog-app",
   "private": true,
   "version": "1.0.0",
+  "packageManager": "pnpm@11.5.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
