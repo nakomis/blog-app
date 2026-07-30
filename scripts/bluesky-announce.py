@@ -191,7 +191,21 @@ Title: {title}
 Article:
 {body}
 
+NEVER include a URL, link, or domain name of any kind. The link is attached \
+separately as a card — a URL in the text is always wrong, and inventing one is \
+worse.
+
 Reply with ONLY the post text — no quotes, no preamble."""
+
+# Belt and braces: the prompt forbids URLs, but a prompt is not a guarantee.
+# A teaser once shipped with a hallucinated "https://blog.example.com/..." in
+# it, which is public and wrong the moment it posts. Anything URL-shaped is
+# stripped, and if that guts the teaser we fall back to title+excerpt.
+URL_RE = re.compile(
+    r"\bhttps?://\S+"                                   # any explicit URL
+    r"|\b(?:[a-z0-9-]+\.)+(?:com|net|org|io|dev|uk|ai)\b\S*",  # bare domains,
+    re.I,                                               # subdomains included
+)
 
 
 def compose_text(post: dict) -> str:
@@ -209,9 +223,14 @@ def compose_text(post: dict) -> str:
             inferenceConfig={"maxTokens": 300, "temperature": 0.8},
         )
         text = resp["output"]["message"]["content"][0]["text"].strip().strip('"')
-        if 0 < len(text) <= MAX_POST_CHARS:
-            return text
-        print(f"warn: teaser length {len(text)} out of range, falling back", file=sys.stderr)
+        stripped = URL_RE.sub("", text)
+        stripped = re.sub(r"\s{2,}", " ", stripped).strip(" \t:—-").strip()
+        if stripped != text:
+            print(f"warn: teaser contained a URL, removed it: {text!r}", file=sys.stderr)
+        # A teaser that was mostly URL is not worth salvaging.
+        if 40 < len(stripped) <= MAX_POST_CHARS:
+            return stripped
+        print(f"warn: teaser length {len(stripped)} out of range, falling back", file=sys.stderr)
     except Exception as err:  # noqa: BLE001 — a broken teaser must not block the announcement
         print(f"warn: teaser generation failed ({err}), falling back", file=sys.stderr)
 
