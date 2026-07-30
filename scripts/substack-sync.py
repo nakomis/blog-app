@@ -100,6 +100,137 @@ DONATE_MD = (
 )
 
 
+# --- Substack renderer limitations (BAPP-8) -------------------------------
+#
+# Two things the blog does that Substack cannot, worked around by rewriting the
+# markdown before it ever reaches python-substack. Both were verified against
+# the live mirror on 2026-07-30 rather than assumed:
+#
+# 1. TABLES. python-substack builds its parser with MarkdownIt("commonmark")
+#    and never enables the table rule, so table lines are never tokenised as a
+#    table — they fall through to the paragraph renderer and arrive as one run
+#    of literal pipe text with the row breaks gone. This is not a preset we can
+#    flip: nodes.py has no table node type at all, so the library has no way to
+#    express one. We flatten tables to bullets instead, which loses the grid but
+#    keeps every cell and its column label.
+#
+# 2. CODE BLOCK LANGUAGES. mdrender does pass language through correctly
+#    (attrs: {"language": "bash"}), and the value survives all the way into the
+#    POSTed draft body — Substack discards it. Every <pre><code> across every
+#    mirrored post is bare, with no class or data attribute. Substack has no
+#    syntax highlighting to drive, so there is nothing to fix on our side; we
+#    label the block with a caption line instead so the reader still knows what
+#    they are looking at.
+FENCE_RE = re.compile(r"^(\s*)(`{3,}|~{3,})\s*(\S*)")
+TABLE_DELIM_RE = re.compile(r"^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)+\|?\s*$")
+
+# Pretty labels for the languages actually used across the blog. Anything not
+# listed is title-cased, so a new language degrades to a sensible label rather
+# than to nothing.
+LANG_LABELS = {
+    "bash": "Bash", "sh": "Shell", "shell": "Shell", "zsh": "Zsh",
+    "python": "Python", "py": "Python", "ts": "TypeScript",
+    "typescript": "TypeScript", "js": "JavaScript", "javascript": "JavaScript",
+    "json": "JSON", "yaml": "YAML", "yml": "YAML", "toml": "TOML",
+    "sql": "SQL", "rust": "Rust", "rs": "Rust", "go": "Go", "c": "C",
+    "cpp": "C++", "java": "Java", "html": "HTML", "css": "CSS",
+    "diff": "Diff", "ini": "INI", "dockerfile": "Dockerfile",
+    "mermaid": "Mermaid", "hcl": "HCL", "xml": "XML", "swift": "Swift",
+}
+# Languages worth no caption: they say nothing a reader cannot already see.
+UNLABELLED_LANGS = {"", "text", "plain", "plaintext", "txt", "console", "output"}
+
+
+def _split_row(line: str) -> list[str]:
+    """Cells of a markdown table row, honouring \\| escapes inside cells."""
+    line = line.strip()
+    if line.startswith("|"):
+        line = line[1:]
+    if line.endswith("|") and not line.endswith("\\|"):
+        line = line[:-1]
+    cells, buf, i = [], "", 0
+    while i < len(line):
+        if line[i] == "\\" and i + 1 < len(line) and line[i + 1] == "|":
+            buf += "|"      # an escaped pipe is content, not a separator
+            i += 2
+            continue
+        if line[i] == "|":
+            cells.append(buf.strip())
+            buf = ""
+        else:
+            buf += line[i]
+        i += 1
+    cells.append(buf.strip())
+    return cells
+
+
+def _table_to_bullets(header: list[str], rows: list[list[str]]) -> list[str]:
+    """Render a table as one bullet per row, first cell as the row's label.
+
+    Two-column tables are the common term/definition case and read better
+    without repeating the second column's header on every line.
+    """
+    out = []
+    for row in rows:
+        row = row + [""] * (len(header) - len(row))    # tolerate short rows
+        label = row[0] or "—"
+        rest = [
+            (f"{header[i]}: {row[i]}" if len(header) > 2 else row[i])
+            for i in range(1, len(header))
+            if row[i]
+        ]
+        out.append(f"- **{label}**" + (f" — {'; '.join(rest)}" if rest else ""))
+    return out
+
+
+def rewrite_for_substack(md: str) -> str:
+    """Flatten tables and caption code blocks, skipping fenced content.
+
+    Fence tracking matters in both directions: a pipe-delimited line inside a
+    shell snippet must not be mistaken for a table, and a fence's own info
+    string must only be read when the fence opens.
+    """
+    lines = md.split("\n")
+    out: list[str] = []
+    fence: str | None = None
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        m = FENCE_RE.match(line)
+        if m and (fence is None or line.strip().startswith(fence)):
+            if fence is None:
+                fence = m.group(2)
+                lang = m.group(3).strip().lower()
+                if lang not in UNLABELLED_LANGS:
+                    label = LANG_LABELS.get(lang, lang.title())
+                    # Blank line before, or Substack glues the caption to the
+                    # preceding paragraph.
+                    if out and out[-1].strip():
+                        out.append("")
+                    out.append(f"**{label}**")
+                    out.append("")
+            else:
+                fence = None
+            out.append(line)
+            i += 1
+            continue
+
+        if fence is None and line.lstrip().startswith("|") \
+                and i + 1 < len(lines) and TABLE_DELIM_RE.match(lines[i + 1]):
+            header = _split_row(line)
+            i += 2
+            rows = []
+            while i < len(lines) and lines[i].lstrip().startswith("|"):
+                rows.append(_split_row(lines[i]))
+                i += 1
+            out.extend(_table_to_bullets(header, rows))
+            continue
+
+        out.append(line)
+        i += 1
+    return "\n".join(out)
+
+
 def parse_frontmatter(text: str) -> tuple[dict, str]:
     """Return ({key: value}, body) from simple `key: "value"` frontmatter."""
     if not text.startswith("---\n"):
@@ -194,12 +325,18 @@ def prepare_markdown(post: dict) -> str:
     title), substitutes {{donate}} for a PayPal link, drops hand-written
     anchors, and prefixes in-document links with the section sign Substack
     expects. See BAPP-7.
+
+    Finally flattens tables and captions code blocks, neither of which Substack
+    can render as the blog does. See BAPP-8 and rewrite_for_substack.
     """
     md = PLACEHOLDER_RE.sub("", post["body"])
     md = DONATE_PLACEHOLDER_RE.sub(DONATE_MD, md)
     md = LEADING_H1_RE.sub("", md, count=1)
     md = BARE_ANCHOR_RE.sub("", md)
     md = INDOC_LINK_RE.sub(r"\1#" + SECTION_SIGN + r"\2)", md)
+    # Last: it is fence-aware, so it must run after the substitutions above
+    # rather than race them for the same lines.
+    md = rewrite_for_substack(md)
     return md.strip() + "\n"
 
 
