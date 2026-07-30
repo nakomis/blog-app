@@ -160,7 +160,8 @@ def markdown_index(content_dir: str) -> tuple[dict, dict]:
     return by_slug, by_title
 
 
-def backfill(api, post_meta: dict, md: str, apply: bool) -> str:
+def backfill(api, post_meta: dict, md: str, apply: bool,
+             republish: bool = False) -> str:
     """Returns a one-line status for this post."""
     slug = post_meta["slug"]
     draft = with_retry(api.get_draft, post_meta["id"])
@@ -172,6 +173,17 @@ def backfill(api, post_meta: dict, md: str, apply: bool) -> str:
 
     if not blocks:
         already = body_raw.count('"highlighted_code_block"')
+        # A 429 between put_draft and publish_draft leaves the draft converted
+        # but the LIVE post still serving the old body — and because this check
+        # reads the draft, such a post then looks done forever. Nothing in the
+        # draft distinguishes "published version is current" from "stale", so
+        # it takes an explicit re-publish to be sure.
+        if already and republish and apply:
+            with_retry(api.publish_draft, post_meta["id"], send=False,
+                       share_automatically=False)
+            return f"done  {slug}: republished {already} already-converted blocks"
+        if already and republish:
+            return f"WOULD  {slug}: republish {already} already-converted blocks"
         return f"skip  {slug}: no legacy code blocks" + (
             f" ({already} already converted)" if already else ""
         )
@@ -217,6 +229,10 @@ def main() -> None:
     parser.add_argument("--slug", help="backfill a single post (do this first)")
     parser.add_argument("--apply", action="store_true",
                         help="actually write; without it, dry run")
+    parser.add_argument("--republish", action="store_true",
+                        help="also re-publish posts already converted — use if a "
+                             "429 landed between put_draft and publish_draft, "
+                             "leaving the live post stale")
     parser.add_argument("--delay", type=float, default=PER_POST_DELAY,
                         help=f"seconds between posts (default {PER_POST_DELAY}) — "
                              "Substack 429s a sustained run")
@@ -249,7 +265,7 @@ def main() -> None:
             print(f"skip  {slug}: no matching markdown in content dir")
             continue
         try:
-            line = backfill(api, meta, md, args.apply)
+            line = backfill(api, meta, md, args.apply, args.republish)
         except Exception as err:  # noqa: BLE001 — report and carry on
             line = f"ERROR {slug}: {err}"
         print(line, flush=True)
