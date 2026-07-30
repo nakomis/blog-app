@@ -64,8 +64,13 @@ FILE_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})-(.+)\.md$")
 # on the mirror, so it is removed. {{donate}} used to be removed too, which left
 # Substack readers with no way to contribute at all — it is now substituted, see
 # DONATE_MD below.
-PLACEHOLDER_RE = re.compile(r"^\s*\{\{image\b[^}]*\}\}\s*$", re.M)
-DONATE_PLACEHOLDER_RE = re.compile(r"^\s*\{\{donate\}\}\s*$", re.M)
+# [ \t]* NOT \s* — \s matches newlines, so the substitution would swallow the
+# blank lines around the placeholder and weld it onto the preceding paragraph.
+# That silently broke the donate button: the linked image has to be the ONLY
+# thing in its paragraph for the renderer to emit a captionedImage, and once it
+# was glued to the author tagline it degraded to a bare text link instead.
+PLACEHOLDER_RE = re.compile(r"^[ \t]*\{\{image\b[^}]*\}\}[ \t]*$", re.M)
+DONATE_PLACEHOLDER_RE = re.compile(r"^[ \t]*\{\{donate\}\}[ \t]*$", re.M)
 LEADING_H1_RE = re.compile(r"^\s*#\s+.+\n+", flags=0)
 
 # Substack supports in-page section links, but prefixes the fragment with a
@@ -159,6 +164,32 @@ def _highlighted_code_block(code: str, language: str = None) -> dict:
 
 
 substack_nodes.code_block = _highlighted_code_block
+
+
+# The library hardcodes 1456x819 (resizeWidth 728) into every captionedImage,
+# which is right for a header illustration and absurd for a 74x21 donate badge.
+# Correct the dimensions for images whose real size we know, so Substack does
+# not reserve a 728px-wide box for a button the size of a postage stamp.
+KNOWN_IMAGE_SIZES = {
+    "https://www.paypalobjects.com/en_GB/i/btn/btn_donate_SM.gif": (74, 21),
+}
+
+_orig_captioned_image = substack_nodes.captioned_image
+
+
+def _captioned_image_sized(src, *a, **kw):
+    node = _orig_captioned_image(src, *a, **kw)
+    size = KNOWN_IMAGE_SIZES.get(src)
+    if size:
+        width, height = size
+        for child in node.get("content", []):
+            if child.get("type") == "image2":
+                child["attrs"].update(width=width, height=height,
+                                      resizeWidth=width)
+    return node
+
+
+substack_nodes.captioned_image = _captioned_image_sized
 
 
 def _split_row(line: str) -> list[str]:
