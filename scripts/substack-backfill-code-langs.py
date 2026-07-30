@@ -160,8 +160,70 @@ def markdown_index(content_dir: str) -> tuple[dict, dict]:
     return by_slug, by_title
 
 
+# The image URL identifies a proper donate BUTTON; the href identifies a donate
+# link of any kind, including the degraded text-only form that the \s* regex bug
+# produced before it was fixed. A post can therefore be in three states: no
+# donate at all (append one), a text link (replace it), or a button (leave it).
+DONATE_URL = "paypalobjects.com/en_GB/i/btn/btn_donate_SM.gif"
+DONATE_HREF = "paypal.com/donate"
+
+
+def strip_text_donate(content: list) -> int:
+    """Remove degraded text-only donate links. Returns how many were removed.
+
+    The bad form is a text node carrying a link mark, usually welded onto the
+    end of the author-tagline paragraph — so drop the node, and drop the
+    paragraph too if that empties it.
+    """
+    removed = 0
+    for node in list(content):
+        if not isinstance(node, dict) or node.get("type") != "paragraph":
+            continue
+        kept = []
+        for child in node.get("content", []):
+            marks = child.get("marks") or [] if isinstance(child, dict) else []
+            is_donate = any(
+                DONATE_HREF in str((m.get("attrs") or {}).get("href", ""))
+                for m in marks if isinstance(m, dict)
+            )
+            if is_donate:
+                removed += 1
+            else:
+                kept.append(child)
+        if removed:
+            # Trailing whitespace-only nodes left behind read as a blank line.
+            while kept and isinstance(kept[-1], dict) \
+                    and not kept[-1].get("text", "").strip():
+                kept.pop()
+            node["content"] = kept
+            if not kept:
+                content.remove(node)
+    return removed
+
+
+def donate_nodes() -> list:
+    """The node(s) a fresh mirror produces for {{donate}}.
+
+    Rendered through the same pipeline rather than hand-built, so a change to
+    DONATE_MD or to the image-sizing patch reaches backfilled posts too.
+    """
+    from substack import mdrender
+    return mdrender.markdown_to_doc(sync.DONATE_MD)
+
+
+def write_draft(api, post_meta: dict, draft: dict, body: dict) -> None:
+    """Update a published post in place and re-publish it silently."""
+    kwargs = {"draft_body": json.dumps(body)}
+    # Republishing without this can re-date the post to now.
+    if draft.get("post_date"):
+        kwargs["post_date"] = draft["post_date"]
+    with_retry(api.put_draft, post_meta["id"], **kwargs)
+    with_retry(api.publish_draft, post_meta["id"], send=False,
+               share_automatically=False)
+
+
 def backfill(api, post_meta: dict, md: str, apply: bool,
-             republish: bool = False) -> str:
+             republish: bool = False, donate: bool = False) -> str:
     """Returns a one-line status for this post."""
     slug = post_meta["slug"]
     draft = with_retry(api.get_draft, post_meta["id"])
@@ -171,7 +233,25 @@ def backfill(api, post_meta: dict, md: str, apply: bool,
     content = body.get("content", body if isinstance(body, list) else [])
     blocks = list(walk_code_blocks(content))
 
+    # Posts mirrored before BAPP-7 had {{donate}} stripped entirely rather than
+    # substituted, so they carry no donate link at all. Append the node a fresh
+    # mirror would produce — built by rendering DONATE_MD through the same
+    # renderer, so it cannot drift from what new posts get.
+    donate_added, replaced = False, 0
+    if donate and DONATE_URL not in body_raw and DONATE_URL in md:
+        replaced = strip_text_donate(content)
+        content.extend(donate_nodes())
+        body["content"] = content
+        donate_added = True
+    donate_note = "replaced text donate link with button" if replaced \
+        else "add donate button"
+
     if not blocks:
+        if donate_added:
+            if not apply:
+                return f"WOULD  {slug}: {donate_note}"
+            write_draft(api, post_meta, draft, body)
+            return f"done  {slug}: {donate_note}"
         already = body_raw.count('"highlighted_code_block"')
         # A 429 between put_draft and publish_draft leaves the draft converted
         # but the LIVE post still serving the old body — and because this check
@@ -209,17 +289,12 @@ def backfill(api, post_meta: dict, md: str, apply: bool,
     summary = ", ".join(sorted(set(applied)))
     if guessed:
         summary += f"; {guessed} from " + ("markdown" if aligned else "default")
+    extra = " + donate button" if donate_added else ""
     if not apply:
-        return f"WOULD  {slug}: convert {len(blocks)} blocks ({summary})"
+        return f"WOULD  {slug}: convert {len(blocks)} blocks ({summary}){extra}"
 
-    kwargs = {"draft_body": json.dumps(body)}
-    # Republishing without this can re-date the post to now.
-    if draft.get("post_date"):
-        kwargs["post_date"] = draft["post_date"]
-    with_retry(api.put_draft, post_meta["id"], **kwargs)
-    with_retry(api.publish_draft, post_meta["id"], send=False,
-               share_automatically=False)
-    return f"done  {slug}: converted {len(blocks)} blocks ({summary})"
+    write_draft(api, post_meta, draft, body)
+    return f"done  {slug}: converted {len(blocks)} blocks ({summary}){extra}"
 
 
 def main() -> None:
@@ -229,6 +304,9 @@ def main() -> None:
     parser.add_argument("--slug", help="backfill a single post (do this first)")
     parser.add_argument("--apply", action="store_true",
                         help="actually write; without it, dry run")
+    parser.add_argument("--donate", action="store_true",
+                        help="also add the donate button to posts mirrored "
+                             "before BAPP-7, which had {{donate}} stripped")
     parser.add_argument("--republish", action="store_true",
                         help="also re-publish posts already converted — use if a "
                              "429 landed between put_draft and publish_draft, "
@@ -265,7 +343,8 @@ def main() -> None:
             print(f"skip  {slug}: no matching markdown in content dir")
             continue
         try:
-            line = backfill(api, meta, md, args.apply, args.republish)
+            line = backfill(api, meta, md, args.apply, args.republish,
+                            args.donate)
         except Exception as err:  # noqa: BLE001 — report and carry on
             line = f"ERROR {slug}: {err}"
         print(line, flush=True)
