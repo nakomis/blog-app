@@ -16,6 +16,7 @@
     "@mui/material": "^7.3.8",
     "bootstrap": "^5.3.8",
     "gray-matter": "^4.0.3",
+    "highlight.js": "^11.11.1",
     "mermaid": "^11.14.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -33,6 +34,7 @@
     "unified": "^11.0.4"
   },
   "devDependencies": {
+    "@types/hast": "^3.0.5",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",
