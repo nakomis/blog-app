@@ -58,8 +58,46 @@ NO_EMAIL_SLUGS = {
 }
 
 FILE_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})-(.+)\.md$")
-PLACEHOLDER_RE = re.compile(r"^\s*\{\{(donate|image\b[^}]*)\}\}\s*$", re.M)
+# {{image}} is a generation directive for the review pipeline and means nothing
+# on the mirror, so it is removed. {{donate}} used to be removed too, which left
+# Substack readers with no way to contribute at all — it is now substituted, see
+# DONATE_MD below.
+PLACEHOLDER_RE = re.compile(r"^\s*\{\{image\b[^}]*\}\}\s*$", re.M)
+DONATE_PLACEHOLDER_RE = re.compile(r"^\s*\{\{donate\}\}\s*$", re.M)
 LEADING_H1_RE = re.compile(r"^\s*#\s+.+\n+", flags=0)
+
+# Substack supports in-page section links, but prefixes the fragment with a
+# section sign. Its own "copy link to section" produces /i/<post_id>/<slug>,
+# which 301s to:
+#     /p/<post-slug>?open=false#%C2%A7<slug>
+# i.e. the fragment is "§<slug>". Headings carry no id attribute — the jump is
+# resolved client-side from that prefixed fragment.
+#
+# Usefully, Substack's slugs match rehype-slug's (github-slugger) output:
+#   "The Cabal"                    -> the-cabal
+#   "Seven models, four winners"   -> seven-models-four-winners
+#   "The bit I wasn't looking for" -> the-bit-i-wasnt-looking-for
+#
+# So an in-document link needs only the prefix adding. Verified 2026-07-30
+# against the live mirror. See BAPP-7.
+SECTION_SIGN = "§"
+INDOC_LINK_RE = re.compile(r"(\[[^\]]+\]\()#(?!" + SECTION_SIGN + r")([^)]+)\)")
+
+# Hand-written <a id="..."></a> anchors cannot work on Substack: there are no
+# heading ids to begin with, and the jump is driven by the heading text slug.
+# Drop them. Posts should link to the heading's own slug instead, which
+# rehype-slug generates on the blog side.
+BARE_ANCHOR_RE = re.compile(r'<a\s+id="[^"]*"\s*>\s*</a>\s*\n?', re.I)
+
+# Substack has no native donation feature; the documented workaround is a link
+# to an external payment URL. PayPal hosts the button image itself, so this
+# needs no hosting of ours — and crucially avoids blog.nakomis.com's hotlink
+# protection, which would serve the pirate image to Substack readers.
+DONATE_MD = (
+    "[![Donate with PayPal]"
+    "(https://www.paypalobjects.com/en_GB/i/btn/btn_donate_SM.gif)]"
+    "(https://www.paypal.com/donate/?hosted_button_id=Q3BESC73EWVNN)"
+)
 
 
 def parse_frontmatter(text: str) -> tuple[dict, str]:
@@ -150,9 +188,18 @@ def subtitle_for(excerpt: str, limit: int = 140) -> str:
 
 
 def prepare_markdown(post: dict) -> str:
-    """Strip placeholders and the leading H1 (Substack renders its own title)."""
+    """Adapt a blog post's markdown for Substack.
+
+    Strips {{image}} directives and the leading H1 (Substack renders its own
+    title), substitutes {{donate}} for a PayPal link, drops hand-written
+    anchors, and prefixes in-document links with the section sign Substack
+    expects. See BAPP-7.
+    """
     md = PLACEHOLDER_RE.sub("", post["body"])
+    md = DONATE_PLACEHOLDER_RE.sub(DONATE_MD, md)
     md = LEADING_H1_RE.sub("", md, count=1)
+    md = BARE_ANCHOR_RE.sub("", md)
+    md = INDOC_LINK_RE.sub(r"\1#" + SECTION_SIGN + r"\2)", md)
     return md.strip() + "\n"
 
 
