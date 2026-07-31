@@ -40,6 +40,7 @@ import uuid
 
 import boto3
 import requests
+from substack import mdrender as substack_mdrender
 from substack import nodes as substack_nodes
 
 PUBLICATION_URL = os.environ.get("SUBSTACK_PUBLICATION_URL", "https://nakomis.substack.com")
@@ -190,6 +191,39 @@ def _captioned_image_sized(src, *a, **kw):
 
 
 substack_nodes.captioned_image = _captioned_image_sized
+
+
+# Inline code is visually indistinguishable from prose on Substack. The blog
+# gives it a colour; Substack renders a bare <code> with no class, and offers
+# authors no custom CSS and no text-colour control, so there is nothing to
+# target. Bold is the only differentiator available through the document model,
+# so inline code is emitted as code+strong. Code BLOCKS are untouched — their
+# text nodes carry no marks, and they have Shiki highlighting anyway.
+def _embolden_inline_code(node) -> None:
+    if not isinstance(node, dict):
+        return
+    marks = node.get("marks")
+    if isinstance(marks, list) and any(
+        isinstance(m, dict) and m.get("type") == "code" for m in marks
+    ) and not any(
+        isinstance(m, dict) and m.get("type") == "strong" for m in marks
+    ):
+        marks.append({"type": substack_nodes.MarkType.STRONG})
+    for child in node.get("content") or []:
+        _embolden_inline_code(child)
+
+
+_orig_markdown_to_doc = substack_mdrender.markdown_to_doc
+
+
+def _markdown_to_doc_bold_code(markdown_content, *a, **kw):
+    doc = _orig_markdown_to_doc(markdown_content, *a, **kw)
+    for node in doc:
+        _embolden_inline_code(node)
+    return doc
+
+
+substack_mdrender.markdown_to_doc = _markdown_to_doc_bold_code
 
 
 def _split_row(line: str) -> list[str]:
