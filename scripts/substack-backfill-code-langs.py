@@ -211,6 +211,31 @@ def donate_nodes() -> list:
     return mdrender.markdown_to_doc(sync.DONATE_MD)
 
 
+def sync_bold_inline_code(content: list) -> int:
+    """Add the strong mark to inline code already stored. Returns the count.
+
+    Reuses the mirror's own walker so the two cannot drift: a post fixed here
+    and a post mirrored fresh end up with identical marks.
+    """
+    before = _count_bold_code(content)
+    for node in content:
+        sync._embolden_inline_code(node)
+    return _count_bold_code(content) - before
+
+
+def _count_bold_code(nodes) -> int:
+    n = 0
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        marks = node.get("marks") or []
+        types = {m.get("type") for m in marks if isinstance(m, dict)}
+        if {"code", "strong"} <= types:
+            n += 1
+        n += _count_bold_code(node.get("content") or [])
+    return n
+
+
 def write_draft(api, post_meta: dict, draft: dict, body: dict) -> None:
     """Update a published post in place and re-publish it silently."""
     kwargs = {"draft_body": json.dumps(body)}
@@ -223,7 +248,8 @@ def write_draft(api, post_meta: dict, draft: dict, body: dict) -> None:
 
 
 def backfill(api, post_meta: dict, md: str, apply: bool,
-             republish: bool = False, donate: bool = False) -> str:
+             republish: bool = False, donate: bool = False,
+             bold_code: bool = False) -> str:
     """Returns a one-line status for this post."""
     slug = post_meta["slug"]
     draft = with_retry(api.get_draft, post_meta["id"])
@@ -237,6 +263,11 @@ def backfill(api, post_meta: dict, md: str, apply: bool,
     # substituted, so they carry no donate link at all. Append the node a fresh
     # mirror would produce — built by rendering DONATE_MD through the same
     # renderer, so it cannot drift from what new posts get.
+    # Inline code is indistinguishable from prose on Substack (no class, no
+    # custom CSS, no colour control), so the mirror now emits code+strong.
+    # Existing posts need the strong mark adding to what is already stored.
+    bolded = sync_bold_inline_code(content) if bold_code else 0
+
     donate_added, replaced = False, 0
     if donate and DONATE_URL not in body_raw and DONATE_URL in md:
         replaced = strip_text_donate(content)
@@ -247,6 +278,11 @@ def backfill(api, post_meta: dict, md: str, apply: bool,
         else "add donate button"
 
     if not blocks:
+        if bolded and not donate_added:
+            if not apply:
+                return f"WOULD  {slug}: embolden {bolded} inline code spans"
+            write_draft(api, post_meta, draft, body)
+            return f"done  {slug}: emboldened {bolded} inline code spans"
         if donate_added:
             if not apply:
                 return f"WOULD  {slug}: {donate_note}"
@@ -290,6 +326,8 @@ def backfill(api, post_meta: dict, md: str, apply: bool,
     if guessed:
         summary += f"; {guessed} from " + ("markdown" if aligned else "default")
     extra = " + donate button" if donate_added else ""
+    if bolded:
+        extra += f" + {bolded} bold inline code"
     if not apply:
         return f"WOULD  {slug}: convert {len(blocks)} blocks ({summary}){extra}"
 
@@ -307,6 +345,9 @@ def main() -> None:
     parser.add_argument("--donate", action="store_true",
                         help="also add the donate button to posts mirrored "
                              "before BAPP-7, which had {{donate}} stripped")
+    parser.add_argument("--bold-code", action="store_true",
+                        help="add the strong mark to inline code, which "
+                             "Substack renders indistinguishably from prose")
     parser.add_argument("--republish", action="store_true",
                         help="also re-publish posts already converted — use if a "
                              "429 landed between put_draft and publish_draft, "
@@ -344,7 +385,7 @@ def main() -> None:
             continue
         try:
             line = backfill(api, meta, md, args.apply, args.republish,
-                            args.donate)
+                            args.donate, args.bold_code)
         except Exception as err:  # noqa: BLE001 — report and carry on
             line = f"ERROR {slug}: {err}"
         print(line, flush=True)
