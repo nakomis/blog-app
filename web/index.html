@@ -13,6 +13,22 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+  <!-- Theme, applied before first paint (BAPP-10). This is deliberately inline
+       and synchronous: doing it from React would leave the default (dark)
+       painted for a frame first, which is a white-to-dark or dark-to-white
+       flash on every load for anyone whose choice differs from the default.
+       Only an explicit stored choice sets data-theme — with nothing stored the
+       attribute stays absent so the prefers-color-scheme rule can win. -->
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem('theme');
+        if (t === 'light' || t === 'dark') {
+          document.documentElement.setAttribute('data-theme', t);
+        }
+      } catch (e) { /* private mode: fall through to system preference */ }
+    })();
+  </script>
   <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-1712135199843745"
      crossorigin="anonymous"></script>
   <script async src="https://www.googletagmanager.com/gtag/js?id=AW-18049757879"></script>

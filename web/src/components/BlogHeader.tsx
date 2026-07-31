@@ -1,3 +1,5 @@
+import ThemeToggle from './ThemeToggle';
+
 export default function BlogHeader() {
   return (
     <header className="header">
@@ -22,7 +24,11 @@ export default function BlogHeader() {
             </a>
           </p>
         </div>
-        <div className="header-spacer" aria-hidden="true" />
+        {/* Occupies the spacer that balanced the logo, so the hero text stays
+            centred rather than shifting when the toggle is added. */}
+        <div className="header-spacer">
+          <ThemeToggle />
+        </div>
       </div>
     </header>
   );
