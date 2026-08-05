@@ -23,8 +23,24 @@ Deliberately quiet by design:
   - Idempotent by URL: the profile's own feed is the record of what has been
     announced; anything linking a post's Substack URL suppresses it forever.
 
-Auth is an app password in SSM (`/blog/prod/bluesky/credentials`, JSON
-`{"handle": ..., "app_password": ...}`).
+Auth is an app password, from `BLUESKY_HANDLE`/`BLUESKY_APP_PASSWORD` if both are
+set, otherwise SSM (`/blog/prod/bluesky/credentials`, JSON `{"handle": ...,
+"app_password": ...}`).
+
+Three modes (PIPE-32):
+
+  (no flag)  Everything in one pass, teaser from Bedrock. This is the original
+             behaviour and the rollback path — do not let it rot.
+  --select   Guards only, on the GitHub runner: pick a post, apply the flood
+             guard and feed idempotency, and print a payload for the Claude Code
+             Routine to fire with. Prints nothing when there is nothing to say.
+  --post     Posting only, inside the Routine's container: take a model-written
+             teaser, put it through the URL guard, re-check idempotency, post.
+
+The split exists because `POST /fire` does not return the Routine's output — it
+is fire-and-forget — so the Routine has to do the posting itself. Everything that
+must not be left to a model's judgement stays in this file on both sides of that
+fence: the model writes one string, and `--post` decides whether it ships.
 """
 import argparse
 import datetime
@@ -33,8 +49,10 @@ import os
 import re
 import sys
 
-import boto3
 import requests
+
+# boto3 is imported lazily: the Routine's container installs only atproto and
+# requests, and never reaches the SSM or Bedrock code paths.
 
 CREDS_PARAM = os.environ.get("BLUESKY_CREDS_PARAM", "/blog/prod/bluesky/credentials")
 AWS_REGION = os.environ.get("AWS_REGION", "eu-west-2")
@@ -47,6 +65,11 @@ CUTOFF_DATE = "2026-07-29"
 # previous day's announcement.
 MIN_GAP_HOURS = 20
 MAX_POST_CHARS = 300
+# How much of the article the teaser writer sees. Same budget the Bedrock prompt
+# has always used; the /fire payload allows 65,536 chars if that ever needs to grow.
+BODY_CHARS = 6000
+# Separates the metadata line from the article in the /fire payload.
+ARTICLE_MARKER = "---article---"
 
 FILE_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})-(.+)\.md$")
 
@@ -65,6 +88,27 @@ def parse_frontmatter(text: str) -> dict:
     return fm
 
 
+def strip_frontmatter(raw: str) -> str:
+    """The article, minus its YAML frontmatter.
+
+    Not `raw.split("\\n---", 2)[-1]`, which is what this used to be. Posts end
+    with a `---` rule above the bio footer, so that returned the ~180-character
+    footer — bio line and `{{donate}}` — instead of the article. Three of the
+    four live posts were being teased from that footer alone.
+
+    (Not the cause of the 4 Aug 2026 hallucinated URL: that post happened to
+    split favourably and the model did see its article. The URL guard is still
+    the thing that stops a repeat.)
+    """
+    if not raw.startswith("---\n"):
+        return raw
+    close = raw.find("\n---", 4)
+    if close == -1:
+        return raw
+    end_of_line = raw.find("\n", close + 4)
+    return raw[end_of_line + 1:] if end_of_line != -1 else ""
+
+
 def candidate_posts(content_dir: str) -> list[dict]:
     """Live posts published on/after the cutoff, oldest first."""
     today = datetime.date.today().isoformat()
@@ -74,7 +118,8 @@ def candidate_posts(content_dir: str) -> list[dict]:
         if not m:
             continue
         with open(os.path.join(content_dir, name), encoding="utf-8") as fh:
-            fm = parse_frontmatter(fh.read())
+            raw = fh.read()
+        fm = parse_frontmatter(raw)
         approved = str(fm.get("approved", "")).strip().lower() == "true"
         publish_date = fm.get("publish_date") or fm.get("date", "")
         if not approved or not publish_date or publish_date > today:
@@ -87,14 +132,11 @@ def candidate_posts(content_dir: str) -> list[dict]:
         mode = str(fm.get("bluesky_announce", "")).strip().lower()
         if mode == "false":
             continue
-        with open(os.path.join(content_dir, name), encoding="utf-8") as fh:
-            raw = fh.read()
-        body = raw.split("\n---", 2)[-1] if raw.startswith("---\n") else raw
         posts.append({
             "slug": name[:-3],
             "title": fm.get("title", name[:-3]),
             "excerpt": fm.get("excerpt", ""),
-            "body": body,
+            "body": strip_frontmatter(raw),
             "publish_date": publish_date,
             "url": f"{SUBSTACK_URL}/p/{name[:-3]}",
             "forced": mode == "force",
@@ -104,6 +146,16 @@ def candidate_posts(content_dir: str) -> list[dict]:
 
 
 def load_credentials() -> dict:
+    # The Routine's container has no AWS credentials and must not be given any —
+    # cloud environment variables are visible to anyone using the environment, so
+    # a revocable Bluesky app password is the only secret that goes in there.
+    handle = os.environ.get("BLUESKY_HANDLE")
+    app_password = os.environ.get("BLUESKY_APP_PASSWORD")
+    if handle and app_password:
+        return {"handle": handle, "app_password": app_password}
+
+    import boto3
+
     ssm = boto3.client("ssm", region_name=AWS_REGION)
     try:
         value = ssm.get_parameter(Name=CREDS_PARAM, WithDecryption=True)["Parameter"]["Value"]
@@ -208,32 +260,8 @@ URL_RE = re.compile(
 )
 
 
-def compose_text(post: dict) -> str:
-    """An AI-written teaser in Martin's voice; title+excerpt as the fallback."""
-    try:
-        bedrock = boto3.client("bedrock-runtime", region_name=AWS_REGION)
-        resp = bedrock.converse(
-            modelId=BEDROCK_MODEL,
-            messages=[{
-                "role": "user",
-                "content": [{"text": TEASER_PROMPT.format(
-                    title=post["title"], body=post["body"][:6000],
-                )}],
-            }],
-            inferenceConfig={"maxTokens": 300, "temperature": 0.8},
-        )
-        text = resp["output"]["message"]["content"][0]["text"].strip().strip('"')
-        stripped = URL_RE.sub("", text)
-        stripped = re.sub(r"\s{2,}", " ", stripped).strip(" \t:—-").strip()
-        if stripped != text:
-            print(f"warn: teaser contained a URL, removed it: {text!r}", file=sys.stderr)
-        # A teaser that was mostly URL is not worth salvaging.
-        if 40 < len(stripped) <= MAX_POST_CHARS:
-            return stripped
-        print(f"warn: teaser length {len(stripped)} out of range, falling back", file=sys.stderr)
-    except Exception as err:  # noqa: BLE001 — a broken teaser must not block the announcement
-        print(f"warn: teaser generation failed ({err}), falling back", file=sys.stderr)
-
+def fallback_text(post: dict) -> str:
+    """Title + excerpt — what ships when a teaser can't be trusted."""
     text = post["title"]
     excerpt = post["excerpt"]
     if excerpt:
@@ -244,24 +272,74 @@ def compose_text(post: dict) -> str:
     return text
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--content-dir", default="web/content/blog")
-    parser.add_argument("--dry-run", action="store_true")
-    args = parser.parse_args()
+def guard_teaser(teaser: str, post: dict) -> str:
+    """Vet a model-written teaser. Deterministic — no model runs in here.
 
-    candidates = candidate_posts(args.content_dir)
+    This is the guard the whole PIPE-32 design is arranged around. It does not
+    care which model wrote the teaser or which side of the fence it came from:
+    anything URL-shaped is stripped, and a teaser that doesn't survive that is
+    replaced with title+excerpt rather than shipped.
+    """
+    text = teaser.strip().strip('"')
+    stripped = URL_RE.sub("", text)
+    stripped = re.sub(r"\s{2,}", " ", stripped).strip(" \t:—-").strip()
+    if stripped != text:
+        # Don't salvage. A teaser containing a URL was written *around* that URL,
+        # so cutting it out leaves prose that reads wrong — "Full write-up at",
+        # "Read more here:" — and that ships publicly the moment it posts. The
+        # model was told not to include links; if it did, distrust the sentence,
+        # not just the substring.
+        print(
+            f"warn: teaser contained a URL, discarding it entirely: {text!r}",
+            file=sys.stderr,
+        )
+        return fallback_text(post)
+    if 40 < len(stripped) <= MAX_POST_CHARS:
+        return stripped
+    print(f"warn: teaser length {len(stripped)} out of range, falling back", file=sys.stderr)
+    return fallback_text(post)
+
+
+def compose_text(post: dict) -> str:
+    """An AI-written teaser in Martin's voice; title+excerpt as the fallback.
+
+    The Bedrock path. Kept intact as the PIPE-32 rollback — if the Routine turns
+    out to be a bad idea, dropping the two new workflow steps restores this.
+    """
+    try:
+        import boto3
+
+        bedrock = boto3.client("bedrock-runtime", region_name=AWS_REGION)
+        resp = bedrock.converse(
+            modelId=BEDROCK_MODEL,
+            messages=[{
+                "role": "user",
+                "content": [{"text": TEASER_PROMPT.format(
+                    title=post["title"], body=post["body"][:BODY_CHARS],
+                )}],
+            }],
+            inferenceConfig={"maxTokens": 300, "temperature": 0.8},
+        )
+        teaser = resp["output"]["message"]["content"][0]["text"]
+    except Exception as err:  # noqa: BLE001 — a broken teaser must not block the announcement
+        print(f"warn: teaser generation failed ({err}), falling back", file=sys.stderr)
+        return fallback_text(post)
+
+    return guard_teaser(teaser, post)
+
+
+def select_post(client, handle: str, content_dir: str) -> dict | None:
+    """The post to announce this run, or None. Every gating rule lives here.
+
+    Runs on the GitHub runner, never inside the Routine — the flood guard and the
+    feed-idempotency check must not be a model's responsibility.
+    """
+    candidates = candidate_posts(content_dir)
     if not candidates:
-        print("No post-cutoff posts are live; nothing to announce.")
-        return
+        print("No post-cutoff posts are live; nothing to announce.", file=sys.stderr)
+        return None
 
-    from atproto import Client, models
-
-    creds = load_credentials()
-    client = Client()
-    client.login(creds["handle"], creds["app_password"])
-
-    announced, latest = announced_state(client, creds["handle"])
+    announced, latest = announced_state(client, handle)
 
     pending = [p for p in candidates if p["url"].rstrip("/") not in announced]
     # Forced posts (PIPE-29) jump the queue and, below, the flood guard.
@@ -275,20 +353,65 @@ def main() -> None:
     if guarded and not (pending and pending[0]["forced"]):
         print(
             f"Last announcement was {latest.isoformat()} — inside the "
-            f"{MIN_GAP_HOURS}-hour flood guard, not posting."
+            f"{MIN_GAP_HOURS}-hour flood guard, not posting.",
+            file=sys.stderr,
         )
-        return
+        return None
 
     if not pending:
-        print("Every eligible post is already announced.")
-        return
+        print("Every eligible post is already announced.", file=sys.stderr)
+        return None
 
-    post = pending[0]
-    text = compose_text(post)
-    if args.dry_run:
-        print(f"DRY RUN: would announce {post['slug']}\n---\n{text}\n---\n{post['url']}")
-        return
+    return pending[0]
 
+
+def fire_payload(post: dict) -> str:
+    """The body of the /fire call: one metadata line, a marker, then the article.
+
+    Single-line JSON on purpose — the Routine has to copy it to a file verbatim,
+    and a one-liner survives that far more reliably than a pretty-printed blob.
+    """
+    meta = json.dumps(
+        {
+            "slug": post["slug"],
+            "title": post["title"],
+            "excerpt": post["excerpt"],
+            "url": post["url"],
+        },
+        separators=(",", ":"),
+    )
+    return f"{meta}\n{ARTICLE_MARKER}\n{post['body'][:BODY_CHARS]}"
+
+
+def load_payload(path: str) -> dict:
+    """Read and validate the metadata the Routine copied out of the fire payload.
+
+    The model copies this blob by hand, so treat it as suspect: require every
+    field, and check the URL against the slug. A corrupted copy then fails closed
+    instead of announcing a post under the wrong link.
+    """
+    with open(path, encoding="utf-8") as fh:
+        raw = fh.read().strip()
+    try:
+        meta = json.loads(raw)
+    except json.JSONDecodeError as err:
+        sys.exit(f"error: {path} is not valid JSON ({err})")
+
+    missing = [k for k in ("slug", "title", "excerpt", "url") if not meta.get(k)]
+    if missing:
+        sys.exit(f"error: payload is missing {', '.join(missing)}")
+
+    expected = f"{SUBSTACK_URL}/p/{meta['slug']}"
+    if meta["url"].rstrip("/") != expected:
+        sys.exit(
+            f"error: payload url {meta['url']!r} does not match its slug "
+            f"(expected {expected!r}) — refusing to announce a mismatched link."
+        )
+    return meta
+
+
+def announce(client, models, post: dict, text: str) -> None:
+    """Upload the card thumbnail and send the post."""
     thumb_bytes = og_image(post["url"])
     thumb = client.upload_blob(thumb_bytes).blob if thumb_bytes else None
     embed = models.AppBskyEmbedExternal.Main(
@@ -301,6 +424,66 @@ def main() -> None:
     )
     client.send_post(text=text, embed=embed)
     print(f"announced on Bluesky: {post['slug']} -> {post['url']}")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--content-dir", default="web/content/blog")
+    parser.add_argument("--dry-run", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--select", action="store_true",
+        help="print a /fire payload for the teaser Routine, or nothing",
+    )
+    mode.add_argument(
+        "--post", action="store_true",
+        help="post a Routine-written teaser (requires --payload and --teaser)",
+    )
+    parser.add_argument("--payload", help="metadata JSON file, for --post")
+    parser.add_argument("--teaser", help="the model-written teaser, for --post")
+    args = parser.parse_args()
+
+    if args.post and not (args.payload and args.teaser):
+        parser.error("--post requires both --payload and --teaser")
+
+    from atproto import Client, models
+
+    creds = load_credentials()
+    client = Client()
+    client.login(creds["handle"], creds["app_password"])
+
+    if args.post:
+        post = load_payload(args.payload)
+        # Second idempotency check. The first ran on the runner minutes ago;
+        # this one closes the gap between firing and posting, and it is the
+        # guard that failed the day a post went out twice.
+        announced, _ = announced_state(client, creds["handle"])
+        if post["url"].rstrip("/") in announced:
+            print(f"{post['slug']} is already announced; not posting again.")
+            return
+        text = guard_teaser(args.teaser, post)
+        if args.dry_run:
+            print(f"DRY RUN: would announce {post['slug']}\n---\n{text}\n---\n{post['url']}")
+            return
+        announce(client, models, post, text)
+        return
+
+    post = select_post(client, creds["handle"], args.content_dir)
+    if post is None:
+        return
+
+    if args.select:
+        # stdout is the payload and nothing else — the workflow treats an empty
+        # stdout as "nothing to announce" and skips the fire entirely.
+        print(fire_payload(post))
+        return
+
+    # No mode flag: the original single-pass behaviour, teaser from Bedrock.
+    text = compose_text(post)
+    if args.dry_run:
+        print(f"DRY RUN: would announce {post['slug']}\n---\n{text}\n---\n{post['url']}")
+        return
+    announce(client, models, post, text)
 
 
 if __name__ == "__main__":

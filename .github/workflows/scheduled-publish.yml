@@ -126,8 +126,48 @@ jobs:
 
       # Announce at most one new post on Bluesky (PIPE-20): post-cutoff posts
       # only, 3-day minimum gap, idempotent against the profile's own feed.
-      - name: Announce on Bluesky
-        run: .venv/bin/python scripts/bluesky-announce.py --content-dir web/content/blog
+      #
+      # The teaser is written by a Claude Code Routine rather than a Bedrock call
+      # (PIPE-32). `/fire` is fire-and-forget — it returns a session URL, not the
+      # routine's output — so the routine does the posting itself. Every guard
+      # still runs in bluesky-announce.py: the gap and idempotency checks below,
+      # the URL guard inside the routine's `--post` call.
+      #
+      # ROLLBACK: delete these two steps and restore the single line
+      #   run: .venv/bin/python scripts/bluesky-announce.py --content-dir web/content/blog
+      # which still works end to end, teaser from Bedrock.
+      - name: Select a post to announce
+        id: select
+        run: |
+          .venv/bin/python scripts/bluesky-announce.py \
+            --select --content-dir web/content/blog > "$RUNNER_TEMP/bluesky-payload.txt"
+          if [ -s "$RUNNER_TEMP/bluesky-payload.txt" ]; then
+            echo "has_post=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_post=false" >> "$GITHUB_OUTPUT"
+            echo "Nothing to announce this run."
+          fi
+
+      # No jq on this runner (nothing may be installed on Luke), so the venv's
+      # python does the JSON escaping — the payload contains a whole article.
+      - name: Fire the teaser Routine
+        if: steps.select.outputs.has_post == 'true'
+        env:
+          ROUTINE_URL: ${{ secrets.BLUESKY_ROUTINE_URL }}
+          ROUTINE_TOKEN: ${{ secrets.BLUESKY_ROUTINE_TOKEN }}
+        run: |
+          .venv/bin/python -c \
+            'import json,sys; sys.stdout.write(json.dumps({"text": sys.stdin.read()}))' \
+            < "$RUNNER_TEMP/bluesky-payload.txt" > "$RUNNER_TEMP/bluesky-fire.json"
+          curl -fsS -X POST "$ROUTINE_URL" \
+            -H "Authorization: Bearer $ROUTINE_TOKEN" \
+            -H "anthropic-beta: experimental-cc-routine-2026-04-01" \
+            -H "anthropic-version: 2023-06-01" \
+            -H "Content-Type: application/json" \
+            --data-binary "@$RUNNER_TEMP/bluesky-fire.json"
+          echo
+          echo "Routine fired. A green run status only means the session started —"
+          echo "open the session URL above to confirm the post actually went out."
 
       # No aws CLI on this runner — publish the alert with the venv's boto3.
       - name: Alert on failure
