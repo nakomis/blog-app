@@ -7,3 +7,6 @@
 #   python3 -m venv .venv && .venv/bin/pip install -r scripts/requirements.txt
 .venv/
 __pycache__/
+
+# Working plan, not checked in
+PLAN.md
