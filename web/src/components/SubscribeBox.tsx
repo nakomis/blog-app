@@ -21,12 +21,20 @@ export default function SubscribeBox() {
           the moment it's published. Just the posts, nothing else.
         </p>
       </div>
-      <iframe
-        src="https://nakomis.substack.com/embed"
-        title="Subscribe to the newsletter"
-        loading="lazy"
-        scrolling="no"
-      />
+      {/* The iframe is Substack's own page and is fixed light — it ships no
+          prefers-color-scheme, so it cannot follow the site's theme, and being
+          cross-origin it cannot be restyled from here either (BAPP-11). On a
+          dark page it therefore lands as a bare white rectangle. Wrapping it in
+          a padded, rounded card of the same white makes that read as an
+          intentional inset panel instead of something broken. */}
+      <div className="subscribe-box__embed">
+        <iframe
+          src="https://nakomis.substack.com/embed"
+          title="Subscribe to the newsletter"
+          loading="lazy"
+          scrolling="no"
+        />
+      </div>
     </aside>
   );
 }
