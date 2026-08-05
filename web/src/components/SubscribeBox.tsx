@@ -69,22 +69,27 @@ export default function SubscribeBox() {
         <button className="subscribe-form__button" type="submit">
           Subscribe
         </button>
+        {/* The subscription is Substack's, not ours, so the wording says so —
+            their own embed says "our Privacy Policy", which reads wrong coming
+            from us. All three links are the ones their embed uses, publication
+            -scoped where theirs are; dropping any would be a disclosure their
+            form makes and ours didn't. */}
         <p id="subscribe-terms" className="subscribe-form__terms">
-          Opens Substack to confirm. By subscribing you agree to their{' '}
-          <a
-            href="https://substack.com/tos"
-            target="_blank"
-            rel="noopener"
-          >
+          Opens Substack to confirm. By subscribing you agree to Substack&rsquo;s{' '}
+          <a href={`${SUBSTACK_URL}/tos`} target="_blank" rel="noopener">
             Terms of Use
+          </a>
+          ,{' '}
+          <a href={`${SUBSTACK_URL}/privacy`} target="_blank" rel="noopener">
+            Privacy Policy
           </a>{' '}
           and{' '}
           <a
-            href="https://substack.com/privacy"
+            href="https://substack.com/ccpa#personal-data-collected"
             target="_blank"
             rel="noopener"
           >
-            Privacy Policy
+            Information collection notice
           </a>
           .
         </p>
