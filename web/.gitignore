@@ -1,7 +1,9 @@
 node_modules/
 dist/
+dist-ssr/
 *.tsbuildinfo
 .DS_Store
 *.swp
 src/content.generated.ts
 public/sitemap.xml
+public/llms.txt

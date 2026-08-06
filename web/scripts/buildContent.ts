@@ -3,6 +3,7 @@ import path from 'path';
 import matter from 'gray-matter';
 import { applyShortcodes } from '../src/shortcodes.js';
 import { createMarkdownProcessor } from '../src/utils/markdownPipeline.js';
+import { BASE_URL, SITE_DESCRIPTION, markdownUrl, postUrl } from '../src/siteConfig.js';
 
 async function processMarkdownContent(markdownContent: string, slug: string) {
   const { data: frontmatter, content } = matter(markdownContent);
@@ -17,8 +18,6 @@ async function processMarkdownContent(markdownContent: string, slug: string) {
     html: result.toString(),
   };
 }
-
-const BASE_URL = 'https://blog.nakomis.com';
 
 async function buildContent() {
   const contentDir = path.join(process.cwd(), 'content', 'blog');
@@ -80,7 +79,7 @@ export const BLOG_POSTS = ${JSON.stringify(posts, null, 2)} as const;
   // Generate sitemap.xml
   const sitemapPath = path.join(process.cwd(), 'public', 'sitemap.xml');
   const postEntries = posts.map(post => {
-    const url = post.frontmatter.canonical ?? `${BASE_URL}/${post.slug}`;
+    const url = post.frontmatter.canonical ?? postUrl(post.slug);
     const lastmod = post.frontmatter.date ?? new Date().toISOString().split('T')[0];
     return `  <url>\n    <loc>${url}</loc>\n    <lastmod>${lastmod}</lastmod>\n  </url>`;
   }).join('\n');
@@ -97,6 +96,40 @@ ${postEntries}
 
   fs.writeFileSync(sitemapPath, sitemap);
   console.log(`✓ Generated sitemap.xml with ${posts.length + 1} URLs`);
+
+  // Generate llms.txt (BAPP-13).
+  //
+  // deploy.sh has always synced the raw markdown to /posts/*.md, but nothing
+  // linked to it, so the cleanest representation of every post was effectively
+  // undiscoverable. The sitemap deliberately does not list these — sitemaps are
+  // for canonical pages, and listing both would muddle canonicalisation.
+  //
+  // Generated from the same `posts` array as the sitemap so it cannot drift.
+  const llmsPath = path.join(process.cwd(), 'public', 'llms.txt');
+  const llmsEntries = posts.map(post => {
+    const excerpt = (post.frontmatter.excerpt ?? '').replace(/\s+/g, ' ').trim();
+    return `- [${post.frontmatter.title}](${markdownUrl(post.slug)})${excerpt ? `: ${excerpt}` : ''}`;
+  }).join('\n');
+
+  const llms = `# Martin Harris — Blog
+
+> ${SITE_DESCRIPTION}
+
+Written by Martin Harris. Every post below links to its raw markdown source,
+which is the same text the rendered page is built from — no navigation, no
+markup, no scripts. The HTML version of any post is at ${BASE_URL}/<slug>.
+
+## Posts
+
+${llmsEntries}
+
+## Other
+
+- [Sitemap](${BASE_URL}/sitemap.xml): all canonical HTML URLs.
+`;
+
+  fs.writeFileSync(llmsPath, llms);
+  console.log(`✓ Generated llms.txt with ${posts.length} posts`);
 }
 
 buildContent().catch(console.error);
