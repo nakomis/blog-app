@@ -59,7 +59,22 @@ const LABEL: Record<Choice, string> = {
 const ICON: Record<Choice, string> = { system: '◐', light: '☀', dark: '☾' };
 
 export default function ThemeToggle() {
-  const [choice, setChoice] = useState<Choice>(readChoice);
+  // Starts at 'system' rather than readChoice() because this render also
+  // happens on the server during prerendering (BAPP-13), where there is no
+  // localStorage. Seeding from storage here would make the server emit the
+  // 'system' icon whilst the client's first render emitted 'dark', and React
+  // would report a hydration mismatch on every load for anyone who has chosen
+  // a theme. The real choice is picked up in the effect below, after
+  // hydration has matched.
+  //
+  // Nothing flashes: the actual theme is applied by the inline script in
+  // index.html before first paint. Only this button's icon settles a moment
+  // later.
+  const [choice, setChoice] = useState<Choice>('system');
+
+  useEffect(() => {
+    setChoice(readChoice());
+  }, []);
 
   // Keep other tabs in step — the theme is a per-reader preference, not
   // per-tab, and seeing one tab disagree with another looks like a bug.

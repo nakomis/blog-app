@@ -4,13 +4,20 @@ import { BlogPost, BlogPostListItem } from '../types';
 import { applyShortcodes } from '../shortcodes';
 import { BLOG_POSTS } from '../content.generated';
 
-export async function getBlogPosts(): Promise<BlogPost[]> {
+// These are deliberately synchronous. `BLOG_POSTS` is a compile-time constant
+// baked into the bundle by scripts/buildContent.ts — there is no I/O to wait
+// for, and the Promises these used to return bought nothing but a "Loading..."
+// frame on every navigation.
+//
+// Being synchronous is also what makes prerendering possible (BAPP-13): an
+// effect-driven load never runs under renderToString, so the crawler would be
+// served the loading state rather than the post.
+export function getBlogPosts(): BlogPost[] {
   return BLOG_POSTS as unknown as BlogPost[];
 }
 
-export async function getBlogPostBySlug(slug: string): Promise<BlogPost | null> {
-  const posts = await getBlogPosts();
-  return posts.find(post => post.slug === slug) || null;
+export function getBlogPostBySlug(slug: string): BlogPost | null {
+  return getBlogPosts().find(post => post.slug === slug) || null;
 }
 
 export function getBlogPostList(posts: BlogPost[]): BlogPostListItem[] {

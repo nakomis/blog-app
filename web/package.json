@@ -6,7 +6,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "npm run content && tsc -b && vite build",
+    "build": "npm run content && tsc -b && vite build && npm run build:ssr && npm run prerender",
+    "build:ssr": "vite build --ssr src/entry-server.tsx --outDir dist-ssr",
+    "prerender": "tsx scripts/prerender.ts",
     "preview": "vite preview",
     "content": "tsx scripts/buildContent.ts"
   },

@@ -39,19 +39,57 @@ export class BlogStack extends Stack {
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
     });
 
-    // Redirect legacy blog.nakom.is requests to the canonical domain, preserving the path
-    const legacyRedirectFunction = new cloudfront.Function(this, 'LegacyDomainRedirect', {
+    // Two jobs in one function, because CloudFront permits only one function
+    // per event type per behaviour and both have to happen on viewer-request:
+    //
+    //  1. Redirect legacy blog.nakom.is requests to the canonical domain,
+    //     preserving the path.
+    //  2. Rewrite extensionless paths to the prerendered .html file (BAPP-13).
+    //     The site is prerendered to dist/<slug>.html, but readers and crawlers
+    //     ask for /<slug>. Without this rewrite the S3 key misses and the
+    //     request falls through to the error responses below — which is exactly
+    //     the empty-shell behaviour prerendering exists to end.
+    const viewerRequestFunction = new cloudfront.Function(this, 'LegacyDomainRedirect', {
       functionName: 'blog-legacy-domain-redirect',
       code: cloudfront.FunctionCode.fromInline(`
 function handler(event) {
-  if (event.request.headers.host.value === '${LEGACY_DOMAIN}') {
+  var request = event.request;
+
+  if (request.headers.host.value === '${LEGACY_DOMAIN}') {
     return {
       statusCode: 301,
       statusDescription: 'Moved Permanently',
-      headers: { location: { value: 'https://${CANONICAL_DOMAIN}' + event.request.uri } }
+      headers: { location: { value: 'https://${CANONICAL_DOMAIN}' + request.uri } }
     };
   }
-  return event.request;
+
+  var uri = request.uri;
+
+  // Leave the root alone — defaultRootObject already maps it to index.html.
+  if (uri === '/') {
+    return request;
+  }
+
+  // Serve /<slug>/ the same page as /<slug>, by rewrite rather than redirect.
+  // A 301 here would be tidier for canonicalisation but would drop the query
+  // string — CloudFront does not carry it into the location header — and that
+  // silently eats utm_* and gclid on any ad click that lands on the slashed
+  // form. The <link rel="canonical"> emitted on every prerendered page is the
+  // mechanism for telling search engines which URL is the real one.
+  if (uri.endsWith('/')) {
+    uri = uri.slice(0, -1);
+  }
+
+  // Anything with a file extension in its last segment is a real asset —
+  // /assets/index-abc123.js, /posts/some-post.md, /favicon.ico — and is
+  // fetched from S3 unchanged.
+  var lastSegment = uri.slice(uri.lastIndexOf('/') + 1);
+  if (lastSegment.indexOf('.') === -1) {
+    uri = uri + '.html';
+  }
+
+  request.uri = uri;
+  return request;
 }
 `),
       runtime: cloudfront.FunctionRuntime.JS_2_0,
@@ -106,7 +144,7 @@ function handler(event) {
         cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
         compress: true,
         functionAssociations: [{
-          function: legacyRedirectFunction,
+          function: viewerRequestFunction,
           eventType: cloudfront.FunctionEventType.VIEWER_REQUEST,
         }],
       },
@@ -141,17 +179,28 @@ function handler(event) {
       domainNames: [CANONICAL_DOMAIN, LEGACY_DOMAIN],
       certificate: certificate,
       defaultRootObject: 'index.html',
+      // Every route is prerendered to its own HTML file (BAPP-13), so a miss is
+      // now a genuine miss and says so.
+      //
+      // This previously mapped both statuses to /index.html with status **200**
+      // — necessary when the SPA had to boot and route client-side, but a soft
+      // 404: every typo URL looked to a crawler like a valid page carrying thin
+      // content, which Google treats as a quality problem across the site.
+      //
+      // 403 is listed as well as 404 because the bucket is private behind OAC
+      // and grants only s3:GetObject — with no s3:ListBucket, S3 answers a
+      // missing key with AccessDenied rather than NoSuchKey.
       errorResponses: [
         {
           httpStatus: 404,
-          responseHttpStatus: 200,
-          responsePagePath: '/index.html',
+          responseHttpStatus: 404,
+          responsePagePath: '/404.html',
           ttl: Duration.minutes(5),
         },
         {
           httpStatus: 403,
-          responseHttpStatus: 200,
-          responsePagePath: '/index.html',
+          responseHttpStatus: 404,
+          responsePagePath: '/404.html',
           ttl: Duration.minutes(5),
         },
       ],
