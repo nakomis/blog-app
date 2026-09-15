@@ -58,6 +58,13 @@ NO_EMAIL_SLUGS = {
     "2026-05-15-ditched-slint-for-egui-thermostat-dial",
     "2026-05-15-three-tickets-one-filesystem",
     "2026-06-03-why-i-switched-to-pnpm",
+    # The September backlog (BAPP-15): the mirror was stuck from 5 to 15 Sep, so
+    # these were already a week or more old on the blog by the time it caught
+    # up. Web-only, backdated to their blog dates (Martin's call, 15 Sep 2026).
+    "2026-08-11-the-refusal-that-saved-the-filesystem",
+    "2026-08-11-the-ai-was-already-paid-for",
+    "2026-05-04-the-disk-is-the-resume-file",
+    "2026-08-11-undone-by-window-status",
 }
 
 FILE_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})-(.+)\.md$")
@@ -477,11 +484,48 @@ def draft_code_block_count(draft: dict) -> int:
     return body.count('"highlighted_code_block"')
 
 
+def unpublished_drafts_for(api, post: dict) -> list[dict]:
+    """Unpublished drafts left behind for this post by interrupted runs.
+
+    `create_draft_from_markdown` and `publish_draft` are separate calls, so a
+    failure between them (5 Sep 2026: a 502 from publish_draft) leaves a draft
+    holding the slug. `published_posts` doesn't see it, the post still counts as
+    missing, and every later run's create fails with "There is already another
+    post with this slug", after creating yet another slug-less copy (BAPP-15).
+    Matched on slug OR title so those copies are caught too.
+
+    post_management/drafts, not the library's get_drafts: /drafts ignores
+    `offset` (paging it never ends) and mixes in published posts.
+    """
+    out, offset, limit = [], 0, 25
+    while True:
+        page = api.call("post_management/drafts", "GET", offset=offset, limit=limit,
+                        order_by="draft_updated_at", order_direction="desc")
+        items = page.get("posts", [])
+        out.extend(
+            d for d in items
+            if not d.get("is_published")
+            and (d.get("slug") == post["slug"]
+                 or norm_title(d.get("draft_title") or "") == norm_title(post["title"]))
+        )
+        if len(items) < limit or offset + len(items) >= page.get("total", 0):
+            return out
+        offset += len(items)
+        time.sleep(2)  # Substack answers paging bursts with a 429
+
+
 def publish_post(api, post: dict, send: bool, dry_run: bool) -> None:
     action = "email" if send else "web-only"
     if dry_run:
         print(f"DRY RUN: would publish {post['slug']} ({action})")
         return
+
+    # Start from a clean slate rather than resuming the leftover: its content is
+    # whatever the markdown said on the day it failed, and the image and
+    # code-block checks below only run on a draft this run created.
+    for stale in unpublished_drafts_for(api, post):
+        print(f"removing unpublished draft {stale['id']} left by an earlier run for {post['slug']}")
+        api.delete_draft(stale["id"])
 
     markdown = prepare_markdown(post)
     result = api.create_draft_from_markdown(
