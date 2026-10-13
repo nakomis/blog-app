@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { BlogPost as BlogPostType } from '../types';
 import SubscribeBox from './SubscribeBox';
+import { AFFILIATE_DISCLOSURE_PATH } from '../siteConfig';
+import { DISCLOSURE_TEXT } from '../utils/amazonLinks';
 
 interface BlogPostProps {
   post: BlogPostType;
@@ -135,6 +137,11 @@ export default function BlogPost({ post }: BlogPostProps) {
             </span>
           ))}
         </div>
+        {post.hasAffiliateLinks && (
+          <p className="affiliate-disclosure">
+            {DISCLOSURE_TEXT} <a href={AFFILIATE_DISCLOSURE_PATH}>About affiliate links</a>
+          </p>
+        )}
       </header>
 
       <div

@@ -1,23 +1,7 @@
 import fs from 'fs';
 import path from 'path';
-import matter from 'gray-matter';
-import { applyShortcodes } from '../src/shortcodes.js';
-import { createMarkdownProcessor } from '../src/utils/markdownPipeline.js';
-import { BASE_URL, SITE_DESCRIPTION, markdownUrl, postUrl } from '../src/siteConfig.js';
-
-async function processMarkdownContent(markdownContent: string, slug: string) {
-  const { data: frontmatter, content } = matter(markdownContent);
-
-  const processor = createMarkdownProcessor();
-
-  const result = await processor.process(applyShortcodes(content, frontmatter as Parameters<typeof applyShortcodes>[1], slug));
-
-  return {
-    slug,
-    frontmatter,
-    html: result.toString(),
-  };
-}
+import { renderPost } from '../src/utils/renderPost.js';
+import { AFFILIATE_DISCLOSURE_PATH, BASE_URL, SITE_DESCRIPTION, markdownUrl, postUrl } from '../src/siteConfig.js';
 
 async function buildContent() {
   const contentDir = path.join(process.cwd(), 'content', 'blog');
@@ -40,6 +24,9 @@ async function buildContent() {
 
   const today = new Date().toISOString().split('T')[0];
   const posts = [];
+  // Affiliate-link problems in posts about to go live (BAPP-16). Collected
+  // rather than thrown so one run reports every bad post, then fails.
+  const fatal: string[] = [];
 
   for (const file of files) {
     const filePath = path.join(contentDir, file);
@@ -47,7 +34,7 @@ async function buildContent() {
     const slug = path.basename(file, '.md');
 
     try {
-      const post = await processMarkdownContent(content, slug);
+      const { post, affiliate } = await renderPost(content, slug);
       // A post goes live only once it is BOTH approved in the review pipeline
       // (blog-pipeline PIPE-5 stamps `approved: true` when it promotes the post
       // back here) AND its publish_date has arrived. The approval gate is
@@ -56,7 +43,25 @@ async function buildContent() {
       // over date; if neither is set the post is skipped.
       const approved = post.frontmatter.approved === true;
       const publishDate: string | undefined = post.frontmatter.publish_date ?? post.frontmatter.date;
-      if (!approved || !publishDate || publishDate > today) {
+      const live = approved && !!publishDate && publishDate <= today;
+
+      // Affiliate checks: warnings are always just reported. Errors (a bad
+      // tracking id, an unresolved short link) fail the build only for a post
+      // that is about to go live; a draft mid-review must not block every
+      // other post's publication.
+      for (const warning of affiliate.warnings) {
+        console.warn(`⚠ ${file}: ${warning}`);
+      }
+      for (const error of affiliate.errors) {
+        if (live) {
+          console.error(`✗ ${file}: ${error}`);
+          fatal.push(`${file}: ${error}`);
+        } else {
+          console.warn(`⚠ ${file} (not live yet, must be fixed before it is): ${error}`);
+        }
+      }
+
+      if (!live) {
         const reason = !approved ? 'not approved' : (publishDate ?? 'no date');
         console.log(`⏳ Skipping (${reason}): ${post.frontmatter.title}`);
         continue;
@@ -66,6 +71,12 @@ async function buildContent() {
     } catch (error) {
       console.error(`✗ Failed to process ${file}:`, error);
     }
+  }
+
+  if (fatal.length > 0) {
+    throw new Error(
+      `${fatal.length} affiliate-link problem(s) in live posts; refusing to build:\n  ${fatal.join('\n  ')}`,
+    );
   }
 
   // Generate TypeScript file
@@ -90,12 +101,15 @@ export const BLOG_POSTS = ${JSON.stringify(posts, null, 2)} as const;
     <loc>${BASE_URL}/</loc>
     <lastmod>${new Date().toISOString().split('T')[0]}</lastmod>
   </url>
+  <url>
+    <loc>${BASE_URL}${AFFILIATE_DISCLOSURE_PATH}</loc>
+  </url>
 ${postEntries}
 </urlset>
 `;
 
   fs.writeFileSync(sitemapPath, sitemap);
-  console.log(`✓ Generated sitemap.xml with ${posts.length + 1} URLs`);
+  console.log(`✓ Generated sitemap.xml with ${posts.length + 2} URLs`);
 
   // Generate llms.txt (BAPP-13).
   //
@@ -132,4 +146,7 @@ ${llmsEntries}
   console.log(`✓ Generated llms.txt with ${posts.length} posts`);
 }
 
-buildContent().catch(console.error);
+buildContent().catch(error => {
+  console.error(error);
+  process.exit(1);
+});

@@ -43,6 +43,8 @@ import requests
 from substack import mdrender as substack_mdrender
 from substack import nodes as substack_nodes
 
+from amazon_links import ShortLinkError, untag_markdown
+
 PUBLICATION_URL = os.environ.get("SUBSTACK_PUBLICATION_URL", "https://nakomis.substack.com")
 SESSION_PARAM = os.environ.get("SUBSTACK_SESSION_PARAM", "/blog/prod/substack/session")
 AWS_REGION = os.environ.get("AWS_REGION", "eu-west-2")
@@ -409,12 +411,20 @@ def prepare_markdown(post: dict) -> str:
 
     Finally flattens tables and captions code blocks, neither of which Substack
     can render as the blog does. See BAPP-8 and rewrite_for_substack.
+
+    Amazon links lose their Associates tag: the Substack copy is emailed, and
+    affiliate links are not allowed in emails (BAPP-16, see amazon_links.py).
+    A short link cannot be untagged, so it stops the run instead.
     """
     md = PLACEHOLDER_RE.sub("", post["body"])
     md = DONATE_PLACEHOLDER_RE.sub(DONATE_MD, md)
     md = LEADING_H1_RE.sub("", md, count=1)
     md = BARE_ANCHOR_RE.sub("", md)
     md = INDOC_LINK_RE.sub(r"\1#" + SECTION_SIGN + r"\2)", md)
+    try:
+        md = untag_markdown(md)
+    except ShortLinkError as err:
+        sys.exit(f"error: {post.get('slug', 'post')}: {err}")
     # Last: it is fence-aware, so it must run after the substitutions above
     # rather than race them for the same lines.
     md = rewrite_for_substack(md)

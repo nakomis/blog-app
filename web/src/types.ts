@@ -12,8 +12,14 @@ export interface BlogPost {
     author: string;
     canonical: string;
     repos?: Array<{ name: string; url: string }>;
+    /** Amazon Associates tracking id for this post's links, e.g.
+     * "nakomis-esp32-21" (BAPP-16). Created by hand in Associates Central. */
+    amazon_tracking_id?: string;
   };
   html: string;
+  /** Set by the build when the post contains Amazon Associates links; the
+   * post then shows the affiliate disclosure. */
+  hasAffiliateLinks?: boolean;
 }
 
 export interface BlogPostListItem {

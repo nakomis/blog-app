@@ -1,8 +1,6 @@
-import matter from 'gray-matter';
-import { createMarkdownProcessor } from './markdownPipeline';
 import { BlogPost, BlogPostListItem } from '../types';
-import { applyShortcodes } from '../shortcodes';
 import { BLOG_POSTS } from '../content.generated';
+import { renderPost } from './renderPost';
 
 // These are deliberately synchronous. `BLOG_POSTS` is a compile-time constant
 // baked into the bundle by scripts/buildContent.ts — there is no I/O to wait
@@ -33,15 +31,5 @@ export function getBlogPostList(posts: BlogPost[]): BlogPostListItem[] {
 }
 
 export async function processMarkdown(markdownContent: string, slug: string): Promise<BlogPost> {
-  const { data: frontmatter, content } = matter(markdownContent);
-
-  const processor = createMarkdownProcessor();
-
-  const result = await processor.process(applyShortcodes(content, frontmatter as BlogPost['frontmatter'], slug));
-
-  return {
-    slug,
-    frontmatter: frontmatter as BlogPost['frontmatter'],
-    html: result.toString(),
-  };
+  return (await renderPost(markdownContent, slug)).post;
 }

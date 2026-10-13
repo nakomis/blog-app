@@ -64,6 +64,16 @@ pnpm install
 pnpm run dev   # http://localhost:5173
 ```
 
+## Amazon affiliate links (BAPP-16)
+
+Posts may link products on Amazon UK with Martin's Associates tag. How it works:
+
+- `web/src/utils/amazonLinks.ts` + `rehypeAmazonAffiliate.ts` (a rehype plugin in `markdownPipeline.ts`): every amazon.co.uk link in a post is rewritten to `https://www.amazon.co.uk/dp/<ASIN>?tag=<id>` (other UK pages keep their path and gain the tag), with `rel="sponsored nofollow noopener"` and `target="_blank"`. The tag is the post's `amazon_tracking_id` frontmatter, falling back to the store id `nakomis-21` with a build warning.
+- Build errors (fatal only for posts about to go live, so a draft cannot block publication): a tracking id that isn't `[a-z0-9-]+-21`, or an unresolved short link (`link.amazon`, `amzn.to`...), which the build can't rewrite. Short links are resolved at authoring time by `blog-content/scripts/resolve-amazon-links.py`. Links to other marketplaces (amazon.com...) are left alone with a warning.
+- Posts with affiliate links show the disclosure line at the top (`BlogPost.tsx`); `/affiliate-disclosure` is the site-wide page, linked from the footer.
+- Substack: the mirror is emailed, and Associates links aren't allowed in emails, so `scripts/substack-sync.py` untags every Amazon link (`scripts/amazon_links.py`) and refuses to mirror a short link.
+- Tests: `cd web && pnpm test` (Vitest) and `python3 -m unittest discover -s scripts -p 'test_*.py'`; both run on PRs (`.github/workflows/test.yml`).
+
 ## Semantic search / RAG pipeline
 
 Blog posts are chunked and embedded so the chat assistant and search UI can do semantic retrieval.
