@@ -14,6 +14,7 @@ import { StaticRouter } from 'react-router-dom/server';
 import { AppRoutes } from './App';
 import { getBlogPosts } from './utils/contentProcessor';
 import {
+  AFFILIATE_DISCLOSURE_PATH,
   BASE_URL,
   SITE_DESCRIPTION,
   SITE_TITLE,
@@ -61,7 +62,16 @@ export function getRoutes(): PrerenderRoute[] {
     ogType: 'article',
   }));
 
-  return [home, ...posts];
+  const disclosure: PrerenderRoute = {
+    url: AFFILIATE_DISCLOSURE_PATH,
+    outFile: `${AFFILIATE_DISCLOSURE_PATH.slice(1)}.html`,
+    title: 'Affiliate links | Martin Harris',
+    description: 'How and why some posts on this blog use Amazon Associates links.',
+    canonical: `${BASE_URL}${AFFILIATE_DISCLOSURE_PATH}`,
+    ogType: 'website',
+  };
+
+  return [home, disclosure, ...posts];
 }
 
 export function render(url: string): string {

@@ -18,3 +18,6 @@ export const markdownUrl = (slug: string) => `${BASE_URL}/posts/${slug}.md`;
 
 /** The canonical page URL for a post. */
 export const postUrl = (slug: string) => `${BASE_URL}/${slug}`;
+
+/** The site-wide affiliate disclosure page (BAPP-16), linked from the footer. */
+export const AFFILIATE_DISCLOSURE_PATH = '/affiliate-disclosure';

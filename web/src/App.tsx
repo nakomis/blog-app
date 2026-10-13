@@ -5,6 +5,8 @@ import BlogHeader from './components/BlogHeader';
 import BlogFooter from './components/BlogFooter';
 import BlogHome from './components/BlogHome';
 import BlogPost from './components/BlogPost';
+import AffiliateDisclosure from './components/AffiliateDisclosure';
+import { AFFILIATE_DISCLOSURE_PATH } from './siteConfig';
 import './App.css';
 
 // The post list is derived from a compile-time constant, so it is itself
@@ -46,11 +48,15 @@ const PostPage: React.FC = () => {
 
 const HomePage: React.FC = () => <Shell><BlogHome posts={POST_LIST} /></Shell>;
 
+const AffiliateDisclosurePage: React.FC = () => <Shell><AffiliateDisclosure /></Shell>;
+
 // Routes without a router, so the same tree can be driven by BrowserRouter in
 // the browser and StaticRouter during prerendering (see entry-server.tsx).
 export const AppRoutes: React.FC = () => (
   <Routes>
     <Route path="/" element={<HomePage />} />
+    {/* Before /:slug, which would otherwise claim it as a missing post. */}
+    <Route path={AFFILIATE_DISCLOSURE_PATH} element={<AffiliateDisclosurePage />} />
     <Route path="/:slug" element={<PostPage />} />
     <Route path="*" element={<NotFoundPage />} />
   </Routes>

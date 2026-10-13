@@ -1,3 +1,5 @@
+import { AFFILIATE_DISCLOSURE_PATH } from '../siteConfig';
+
 export default function BlogFooter() {
   return (
     <footer className="blog-footer">
@@ -7,6 +9,7 @@ export default function BlogFooter() {
         </a>{' '}
         licensed under CC0.
         Blog content ©2026 Martin Harris. All rights reserved.{' '}
+        <a href={AFFILIATE_DISCLOSURE_PATH}>Affiliate links</a>.
       </p>
       <p>
         <em>"Ceci n'est pas une API Gateway"</em> — Making cloud abstractions tangible through physical hardware.

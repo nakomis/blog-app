@@ -564,6 +564,20 @@ a:hover {
 }
 
 
+/* Amazon Associates disclosure at the top of posts with affiliate links (BAPP-16).
+   Deliberately quiet: it has to be clear, not loud. */
+.affiliate-disclosure {
+  font-size: 0.85rem;
+  font-style: italic;
+  color: rgba(var(--fg-rgb), 0.7);
+  margin: 0 0 1rem;
+}
+
+.affiliate-disclosure a {
+  color: inherit;
+  text-decoration: underline;
+}
+
 /* Search styles */
 .blog-search {
   margin-bottom: 3rem;

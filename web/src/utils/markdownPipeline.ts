@@ -9,6 +9,7 @@ import rehypeAutolinkHeadings, { type Options as AutolinkOptions } from 'rehype-
 import rehypeHighlight from 'rehype-highlight';
 import rehypeStringify from 'rehype-stringify';
 import type { Element } from 'hast';
+import rehypeAmazonAffiliate, { type RehypeAmazonAffiliateOptions } from './rehypeAmazonAffiliate';
 
 /**
  * The '#' appended to each heading. Wrapped in a span marked aria-hidden so the
@@ -50,14 +51,18 @@ const AUTOLINK_OPTIONS: AutolinkOptions = {
  *    which is what makes `[jump](#some-heading)` work at all.
  *  - rehypeAutolinkHeadings appends the clickable anchor. The click-to-copy
  *    behaviour is wired up in BlogPost.tsx; here we only emit the markup.
+ *  - rehypeAmazonAffiliate (BAPP-16) also runs after rehypeRaw, so Amazon links
+ *    written as raw HTML are rewritten too. It leaves what it found on
+ *    `file.data.affiliate`, which the build uses for the disclosure and checks.
  */
-export function createMarkdownProcessor() {
+export function createMarkdownProcessor(affiliate: RehypeAmazonAffiliateOptions = {}) {
   return unified()
     .use(remarkParse)
     .use(remarkFrontmatter)
     .use(remarkGfm)
     .use(remarkRehype, { allowDangerousHtml: true })
     .use(rehypeRaw)
+    .use(rehypeAmazonAffiliate, affiliate)
     .use(rehypeSlug)
     .use(rehypeAutolinkHeadings, AUTOLINK_OPTIONS)
     .use(rehypeHighlight)
