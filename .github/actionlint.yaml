@@ -1,0 +1,5 @@
+# actionlint configuration. The Substack mirror job runs on the self-hosted
+# runner on Luke (PIPE-18), which carries this custom label.
+self-hosted-runner:
+  labels:
+    - substack

@@ -73,6 +73,8 @@ export default function ThemeToggle() {
   const [choice, setChoice] = useState<Choice>('system');
 
   useEffect(() => {
+    // Deliberate: a one-off sync after hydration, for the reason above.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setChoice(readChoice());
   }, []);
 

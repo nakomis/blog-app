@@ -10,10 +10,14 @@ AWS SSO profile: `nakom.is-admin`
 
 Always use `cdk` directly, never `npx cdk` — the latter loses SSO auth context.
 
+## Environments (BAPP-6)
+
+`NPM_ENVIRONMENT` (`sandbox` | `prod`, read by `infra/lib/config.ts`) selects the environment; **unset means prod**, so the commands below are unchanged. Sandbox is `blog.sandbox.nakomis.com` in account `975050268859` (profile `nakom.is-sandbox`), with stacks suffixed `-sandbox`; it has no legacy domain and no `/api/search` proxy.
+
 ## Deploy order (from scratch)
 
 ```
-BlogCertStack (us-east-1) → BlogStack (eu-west-2) → BlogGithubStack (one-time)
+BlogCertStack (us-east-1) → BlogStack (eu-west-2) → BlogGithubStack (one-time) → BlogGithubCiStack (one-time)
 ```
 
 ```bash
@@ -21,7 +25,15 @@ cd infra
 cdk deploy BlogCertStack --profile nakom.is-admin
 cdk deploy BlogStack --profile nakom.is-admin
 cdk deploy BlogGithubStack --profile nakom.is-admin
+cdk deploy BlogGithubCiStack --profile nakom.is-admin
+
+# Sandbox: everything at once
+NPM_ENVIRONMENT=sandbox cdk deploy --all --profile nakom.is-sandbox
 ```
+
+## CI/CD
+
+`.github/workflows/ci.yml` (modelled on blog-pipeline's): on PRs and pushes to `main` it lints, type-checks, tests and builds `web/`, runs the Python script tests, type-checks and tests `infra/` (Jest), and synths sandbox using the OIDC role `nakomis-blog-app-github-ci-sandbox`. Pushes to `main` then deploy the stacks to sandbox and publish the site there (`web/scripts/deploy.sh sandbox`). A manual run on `main` with **promote to production** ticked also deploys the prod stacks (role `nakomis-blog-app-github-ci-prod`). The production site itself is still published by `scheduled-publish.yml`. First-time bootstrap steps are in the README under **CI/CD → First deployment**.
 
 ## Publishing a blog post
 
@@ -50,7 +62,7 @@ git commit -m "chore: update blog-content submodule"
 # 2. Build
 cd web && pnpm run build
 
-# 3. Deploy to S3 and invalidate CloudFront
+# 3. Deploy to S3 and invalidate CloudFront (prod by default; pass `sandbox` for sandbox)
 bash web/scripts/deploy.sh
 ```
 
@@ -72,7 +84,7 @@ Posts may link products on Amazon UK with Martin's Associates tag. How it works:
 - Build errors (fatal only for posts about to go live, so a draft cannot block publication): a tracking id that isn't `[a-z0-9-]+-21`, or an unresolved short link (`link.amazon`, `amzn.to`...), which the build can't rewrite. Short links are resolved at authoring time by `blog-content/scripts/resolve-amazon-links.py`. Links to other marketplaces (amazon.com...) are left alone with a warning.
 - Posts with affiliate links show the disclosure line at the top (`BlogPost.tsx`); `/affiliate-disclosure` is the site-wide page, linked from the footer.
 - Substack: the mirror is emailed, and Associates links aren't allowed in emails, so `scripts/substack-sync.py` untags every Amazon link (`scripts/amazon_links.py`) and refuses to mirror a short link.
-- Tests: `cd web && pnpm test` (Vitest) and `python3 -m unittest discover -s scripts -p 'test_*.py'`; both run on PRs (`.github/workflows/test.yml`).
+- Tests: `cd web && pnpm test` (Vitest) and `python3 -m unittest discover -s scripts -p 'test_*.py'`; both run on PRs (`.github/workflows/ci.yml`).
 
 ## Semantic search / RAG pipeline
 

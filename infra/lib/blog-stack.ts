@@ -7,11 +7,10 @@ import * as route53 from 'aws-cdk-lib/aws-route53';
 import * as targets from 'aws-cdk-lib/aws-route53-targets';
 import * as ssm from 'aws-cdk-lib/aws-ssm';
 import { Construct } from 'constructs';
-
-const CANONICAL_DOMAIN = 'blog.nakomis.com';
-const LEGACY_DOMAIN = 'blog.nakom.is';
+import { EnvConfig } from './config';
 
 export interface BlogStackProps extends StackProps {
+  readonly config: EnvConfig;
   readonly certificate: cm.ICertificate;
 }
 
@@ -22,18 +21,15 @@ export class BlogStack extends Stack {
   constructor(scope: Construct, id: string, props: BlogStackProps) {
     super(scope, id, props);
 
-    const { certificate } = props;
+    const { config, certificate } = props;
+    const { domainName, legacyDomain, suffix } = config;
 
-    const nakomIsZone = route53.HostedZone.fromLookup(this, 'NakomIsZone', {
-      domainName: 'nakom.is',
-    });
-
-    const nakomisComZone = route53.HostedZone.fromLookup(this, 'NakomisComZone', {
-      domainName: 'nakomis.com',
+    const zone = route53.HostedZone.fromLookup(this, 'Zone', {
+      domainName: config.hostedZoneName,
     });
 
     this.bucket = new s3.Bucket(this, 'BlogBucket', {
-      bucketName: `blog-nakom-is-${this.region}-${this.account}`,
+      bucketName: config.bucketName,
       removalPolicy: RemovalPolicy.DESTROY,
       autoDeleteObjects: true,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
@@ -43,26 +39,27 @@ export class BlogStack extends Stack {
     // per event type per behaviour and both have to happen on viewer-request:
     //
     //  1. Redirect legacy blog.nakom.is requests to the canonical domain,
-    //     preserving the path.
+    //     preserving the path (production only — sandbox has no legacy domain).
     //  2. Rewrite extensionless paths to the prerendered .html file (BAPP-13).
     //     The site is prerendered to dist/<slug>.html, but readers and crawlers
     //     ask for /<slug>. Without this rewrite the S3 key misses and the
     //     request falls through to the error responses below — which is exactly
     //     the empty-shell behaviour prerendering exists to end.
-    const viewerRequestFunction = new cloudfront.Function(this, 'LegacyDomainRedirect', {
-      functionName: 'blog-legacy-domain-redirect',
-      code: cloudfront.FunctionCode.fromInline(`
-function handler(event) {
-  var request = event.request;
-
-  if (request.headers.host.value === '${LEGACY_DOMAIN}') {
+    const legacyRedirect = legacyDomain ? `
+  if (request.headers.host.value === '${legacyDomain.domainName}') {
     return {
       statusCode: 301,
       statusDescription: 'Moved Permanently',
-      headers: { location: { value: 'https://${CANONICAL_DOMAIN}' + request.uri } }
+      headers: { location: { value: 'https://${domainName}' + request.uri } }
     };
   }
-
+` : '';
+    const viewerRequestFunction = new cloudfront.Function(this, 'LegacyDomainRedirect', {
+      functionName: `blog-legacy-domain-redirect${suffix}`,
+      code: cloudfront.FunctionCode.fromInline(`
+function handler(event) {
+  var request = event.request;
+${legacyRedirect}
   var uri = request.uri;
 
   // Leave the root alone — defaultRootObject already maps it to index.html.
@@ -95,32 +92,25 @@ function handler(event) {
       runtime: cloudfront.FunctionRuntime.JS_2_0,
     });
 
-    // Blog search endpoint — nakom.is API Gateway with a dedicated usage plan (20 req/day).
-    // The API key is injected by CloudFront as x-api-key; it never appears in browser code.
-    // Both values are read from SSM at synth time — no CloudFormation cross-stack dependency.
-    const blogSearchApiDomain = ssm.StringParameter.valueFromLookup(
-      this, '/nakom.is/blog-search-api-domain',
-    );
-    const blogSearchApiKey = ssm.StringParameter.valueFromLookup(
-      this, '/nakom.is/blog-search-api-key',
-    );
-
     const s3Origin = origins.S3BucketOrigin.withOriginAccessControl(this.bucket);
 
     // Hotlink protection for /images/*: requests whose Referer is not one of our
     // own domains are redirected to /images/hotlink.png instead.
     // Direct loads (no Referer) are allowed — that's us browsing.
+    const ownSiteChecks = [
+      '!referer',
+      ...[domainName, legacyDomain?.domainName, 'localhost']
+        .filter((host): host is string => !!host)
+        .map((host) => `referer.indexOf('${host}') !== -1`),
+    ].join('\n    || ');
     const hotlinkProtectionFunction = new cloudfront.Function(this, 'HotlinkProtection', {
-      functionName: 'blog-image-hotlink-protection',
+      functionName: `blog-image-hotlink-protection${suffix}`,
       code: cloudfront.FunctionCode.fromInline(`
 function handler(event) {
   var request = event.request;
   var referer = (request.headers['referer'] || {}).value || '';
 
-  var isOwnSite = !referer
-    || referer.indexOf('blog.nakomis.com') !== -1
-    || referer.indexOf('blog.nakom.is') !== -1
-    || referer.indexOf('localhost') !== -1;
+  var isOwnSite = ${ownSiteChecks};
 
   // Pass through the hotlink image itself to avoid an infinite redirect loop
   if (!isOwnSite && request.uri !== '/images/hotlink.png') {
@@ -136,6 +126,34 @@ function handler(event) {
 `),
       runtime: cloudfront.FunctionRuntime.JS_2_0,
     });
+
+    // Blog search endpoint — nakom.is API Gateway with a dedicated usage plan (20 req/day).
+    // The API key is injected by CloudFront as x-api-key; it never appears in browser code.
+    // Both values are read from SSM at synth time — no CloudFormation cross-stack dependency.
+    // Production only: the API and its parameters live in the production account,
+    // so /api/search on sandbox falls through to the 404 page.
+    const searchBehaviour: Record<string, cloudfront.BehaviorOptions> = {};
+    if (config.blogSearchApi) {
+      const blogSearchApiDomain = ssm.StringParameter.valueFromLookup(
+        this, '/nakom.is/blog-search-api-domain',
+      );
+      const blogSearchApiKey = ssm.StringParameter.valueFromLookup(
+        this, '/nakom.is/blog-search-api-key',
+      );
+      // originPath '/prod' + CloudFront URI '/api/search' → API GW resource '/api/search'.
+      searchBehaviour['/api/search'] = {
+        origin: new origins.HttpOrigin(blogSearchApiDomain, {
+          originId: 'BlogSearchOrigin',
+          protocolPolicy: cloudfront.OriginProtocolPolicy.HTTPS_ONLY,
+          originPath: '/prod',
+          customHeaders: { 'x-api-key': blogSearchApiKey },
+        }),
+        allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
+        cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
+        originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+        viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+      };
+    }
 
     this.distribution = new cloudfront.Distribution(this, 'BlogDistribution', {
       defaultBehavior: {
@@ -160,23 +178,9 @@ function handler(event) {
             eventType: cloudfront.FunctionEventType.VIEWER_REQUEST,
           }],
         },
-        // Proxy search requests to the nakom.is API Gateway.
-        // CloudFront injects x-api-key — it never appears in browser code.
-        // originPath '/prod' + CloudFront URI '/api/search' → API GW resource '/api/search'.
-        '/api/search': {
-          origin: new origins.HttpOrigin(blogSearchApiDomain, {
-            originId: 'BlogSearchOrigin',
-            protocolPolicy: cloudfront.OriginProtocolPolicy.HTTPS_ONLY,
-            originPath: '/prod',
-            customHeaders: { 'x-api-key': blogSearchApiKey },
-          }),
-          allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
-          cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
-          originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
-          viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
-        },
+        ...searchBehaviour,
       },
-      domainNames: [CANONICAL_DOMAIN, LEGACY_DOMAIN],
+      domainNames: legacyDomain ? [domainName, legacyDomain.domainName] : [domainName],
       certificate: certificate,
       defaultRootObject: 'index.html',
       // Every route is prerendered to its own HTML file (BAPP-13), so a miss is
@@ -204,23 +208,39 @@ function handler(event) {
           ttl: Duration.minutes(5),
         },
       ],
-      comment: 'Blog distribution',
+      comment: config.deployEnv === 'prod' ? 'Blog distribution' : `Blog distribution (${config.deployEnv})`,
     });
 
     new route53.ARecord(this, 'BlogARecord', {
-      zone: nakomisComZone,
-      recordName: CANONICAL_DOMAIN,
+      zone,
+      recordName: domainName,
       target: route53.RecordTarget.fromAlias(
         new targets.CloudFrontTarget(this.distribution)
       ),
     });
 
-    new route53.ARecord(this, 'BlogLegacyARecord', {
-      zone: nakomIsZone,
-      recordName: LEGACY_DOMAIN,
-      target: route53.RecordTarget.fromAlias(
-        new targets.CloudFrontTarget(this.distribution)
-      ),
+    if (legacyDomain) {
+      const legacyZone = route53.HostedZone.fromLookup(this, 'LegacyZone', {
+        domainName: legacyDomain.hostedZoneName,
+      });
+      new route53.ARecord(this, 'BlogLegacyARecord', {
+        zone: legacyZone,
+        recordName: legacyDomain.domainName,
+        target: route53.RecordTarget.fromAlias(
+          new targets.CloudFrontTarget(this.distribution)
+        ),
+      });
+    }
+
+    // Where CI's site publish finds the bucket and distribution (BAPP-6),
+    // following blog-pipeline's `<prefix>/web/*` parameters.
+    new ssm.StringParameter(this, 'BucketNameParam', {
+      parameterName: `${config.ssmPrefix}/web/bucket-name`,
+      stringValue: this.bucket.bucketName,
+    });
+    new ssm.StringParameter(this, 'DistributionIdParam', {
+      parameterName: `${config.ssmPrefix}/web/distribution-id`,
+      stringValue: this.distribution.distributionId,
     });
   }
 }

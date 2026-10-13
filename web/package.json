@@ -11,7 +11,9 @@
     "prerender": "tsx scripts/prerender.ts",
     "preview": "vite preview",
     "content": "tsx scripts/buildContent.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "lint": "eslint .",
+    "typecheck": "npm run content && tsc -b"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",
@@ -37,12 +39,17 @@
     "unified": "^11.0.4"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/hast": "^3.0.5",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",
+    "eslint": "^10.12.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.13.0",
     "tsx": "^4.7.0",
     "typescript": "~5.6.2",
+    "typescript-eslint": "^8.71.2",
     "vite": "^6.0.0",
     "vitest": "^3.2.7"
   }
