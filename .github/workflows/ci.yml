@@ -1,0 +1,230 @@
+name: CI
+
+# PR checks, sandbox deploy and a manual promote to production (BAPP-6),
+# following blog-pipeline's ci.yml.
+#
+# - Every PR and push to main: lint, type-check, test and build the web app,
+#   run the Python script tests, test the CDK app and synth it for sandbox.
+# - Push to main (or a manual run): deploy the stacks to sandbox and publish
+#   the site to blog.sandbox.nakomis.com.
+# - Manual run on main with "promote to production" ticked: deploy the
+#   production stacks. The production *site* is still published by the
+#   scheduled-publish workflow, exactly as before.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      promote_to_prod:
+        description: Also deploy the production stacks once sandbox succeeds (main only)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# Supersede an in-flight run for the same PR; never cancel a deploy on main.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Check out the post-merge state on PRs so CI validates what will land on main,
+# not just the branch tip. Falls back to the commit SHA on push/workflow_dispatch.
+env:
+  CHECKOUT_REF: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/merge', github.event.pull_request.number) || github.sha }}
+
+jobs:
+  web:
+    name: Web — lint, type-check, test, build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      # No blog-content checkout: the build copes with an empty content
+      # directory, and PR checks should not depend on the private repo.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.CHECKOUT_REF }}
+          submodules: false
+      # pnpm (version pinned via web/package.json "packageManager"). Must
+      # precede setup-node so its cache can key off the pnpm store.
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run lint
+      - run: pnpm run typecheck
+      - run: pnpm test
+      - run: pnpm run build
+
+  scripts:
+    name: Scripts — Python tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.CHECKOUT_REF }}
+          submodules: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      # Stdlib-only modules; the Substack/Bluesky scripts themselves need the
+      # self-hosted runner's venv and are not exercised here.
+      - name: unittest
+        run: python -m unittest discover -s scripts -p 'test_*.py' -v
+
+  infra:
+    name: Infra — type-check, test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.CHECKOUT_REF }}
+          submodules: false
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: infra/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: infra/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run typecheck
+      - run: pnpm test
+
+  synth:
+    name: CDK synth — sandbox
+    runs-on: ubuntu-latest
+    needs: infra
+    permissions:
+      id-token: write
+      contents: read
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.CHECKOUT_REF }}
+          submodules: false
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: infra/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: infra/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      # cdk.context.json is not committed (it would hold the search API key),
+      # so synth resolves HostedZone.fromLookup live — which needs AWS
+      # credentials.
+      - name: Configure AWS credentials (sandbox)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::975050268859:role/nakomis-blog-app-github-ci-sandbox
+          aws-region: eu-west-2
+      - run: pnpm run ci-synth-sandbox
+
+  deploy-sandbox:
+    name: Deploy — sandbox
+    runs-on: ubuntu-latest
+    needs: [web, scripts, synth]
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    environment: sandbox
+    concurrency:
+      group: deploy-sandbox
+      cancel-in-progress: false
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.CHECKOUT_REF }}
+          submodules: false
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: |
+            web/pnpm-lock.yaml
+            infra/pnpm-lock.yaml
+      - name: Configure AWS credentials (sandbox)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::975050268859:role/nakomis-blog-app-github-ci-sandbox
+          aws-region: eu-west-2
+      - name: Deploy the stacks to sandbox
+        working-directory: infra
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run ci-deploy-sandbox
+      # cdk deploy creates the bucket and distribution but does not fill them.
+      # Same content as the scheduled production publish: the latest
+      # blog-content, filtered at build time to approved, dated posts.
+      - name: Load blog-content deploy key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.BLOG_CONTENT_DEPLOY_KEY }}
+      - name: Pull latest blog-content
+        run: git submodule update --init --remote web/content
+      - name: Build and publish the site
+        working-directory: web
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build
+          bash scripts/deploy.sh sandbox
+
+  deploy-production:
+    name: Deploy — production
+    runs-on: ubuntu-latest
+    needs: deploy-sandbox
+    # Manual only: a workflow_dispatch on main with promote_to_prod ticked.
+    if: github.event_name == 'workflow_dispatch' && inputs.promote_to_prod && github.ref == 'refs/heads/main'
+    environment: production
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    permissions:
+      id-token: write
+      contents: read
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.CHECKOUT_REF }}
+          submodules: false
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: infra/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: infra/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Configure AWS credentials (production)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::637423226886:role/nakomis-blog-app-github-ci-prod
+          aws-region: eu-west-2
+      - name: Deploy the stacks to production
+        run: pnpm run ci-deploy-prod
