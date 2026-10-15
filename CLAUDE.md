@@ -1,3 +1,6 @@
+> ⚠️ **Secret read at synth time — see BAPP-14 before touching CDK.**
+> `infra/lib/blog-stack.ts` reads `/nakom.is/blog-search-api-key` via `ssm.StringParameter.valueFromLookup`, which bakes the key into the synthesised template and `cdk.context.json`. Until [BAPP-14](https://plane.home.nakomis.com/nakomis/browse/BAPP-14/) replaces it with a deploy-time reference: don't run `cdk synth`/`diff`/`deploy` in CI, don't commit `cdk.context.json` or `cdk.out`, and don't add CDK steps to any workflow.
+
 # blog-app — Project Notes for Claude
 
 ## What this project is
