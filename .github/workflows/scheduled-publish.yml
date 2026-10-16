@@ -84,14 +84,16 @@ jobs:
             --subject "blog-app scheduled-publish FAILED" \
             --message "The scheduled-publish workflow failed — check whether the blog deployed. Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
-  # Mirror any newly-live posts to nakomis.substack.com (PIPE-11). Runs on the
-  # self-hosted runner on Luke (PIPE-18): Substack's Cloudflare challenges
-  # GitHub-hosted (datacentre) runner IPs regardless of session validity, so
-  # this job needs a residential IP. Separate job so a mirror failure can
-  # never block the blog deploy itself.
+  # Mirror any newly-live posts to nakomis.substack.com (PIPE-11). Runs on a
+  # self-hosted runner behind the house connection (PIPE-18; moved from Luke to
+  # Mace and Rey, HOME-493): Substack's Cloudflare challenges GitHub-hosted
+  # (datacentre) runner IPs regardless of session validity, and Substack does
+  # not sanction use from a datacentre address, so this job must only ever run
+  # from a home IP (`home-ip`). Separate job so a mirror failure can never
+  # block the blog deploy itself.
   substack:
     needs: publish
-    runs-on: [self-hosted, substack]
+    runs-on: [self-hosted, substack, home-ip]
     steps:
       - name: Checkout blog-app
         uses: actions/checkout@v4
